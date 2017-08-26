@@ -1,0 +1,10 @@
+*.Rproj.user
+*.Rhistory
+*.RData
+*.Ruserdata
+*.Rbuildignore
+*.Rproj
+/docs/
+/megadaph.nuc/data/
+/megadaph.nuc/data-raw/
+.Rproj.user
