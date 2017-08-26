@@ -9,4 +9,5 @@ Encoding: UTF-8
 LazyData: true
 RoxygenNote: 6.0.1
 Remotes: fennerm/fen.R.util
-Imports: data.table
+Imports: data.table,
+    Biostrings
