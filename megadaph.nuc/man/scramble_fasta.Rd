@@ -4,14 +4,14 @@
 \alias{scramble_fasta}
 \title{Scramble a fasta file}
 \usage{
-scramble_fasta(fasta, outfile)
+scramble_fasta(fasta)
 }
 \arguments{
 \item{fasta}{Input fasta file}
-
-\item{outfile}{Output file path}
+}
+\value{
+A scrambled DNAstring object
 }
 \description{
-For each sequence in the file, randomly scramble the sequence and write to
-file.
+For each sequence in the file, randomly scramble the sequence
 }
