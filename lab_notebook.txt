@@ -1,0 +1,101 @@
+Fenner Macrae Megadaph Lab Notebook
+===============================================================================
+# vim: textwidth=79
+
+Logs of specific commands run can be found in analysis directories.
+
+===============================================================================
+August 21st, 2017
+===============================================================================
+
+-------------------------------------------------------------------------------
+Summary of project so far:
+-------------------------------------------------------------------------------
+- Emily has trimmed and merged reads (~/megadaph/reads/cleaned_reads/)
+
+- Emily has produced draft assemblies for all starting controls using SPAdes
+  (~/megadaph/assembly/spades_Aug2017/)
+
+- I constructed a Kraken (https://ccb.jhu.edu/software/kraken/) database
+containing all complete prokaryotic refseq assemblies
+(~/megadaph/decontamination/kraken/db/). Kraken's database build scripts are
+out of date, so I used a user produced set of scripts
+(https://github.com/mw55309/Kraken_db_install_scripts). Protocol was followed
+from (http://www.opiniomics.org/building-a-kraken-database-with-new-ftp-\
+structure-and-no-gi-numbers/)
+
+- I also downloaded the prebuilt full nt database for Centrifuge
+  (https://ccb.jhu.edu/software/centrifuge)
+
+-------------------------------------------------------------------------------
+Activity Log for today:
+-------------------------------------------------------------------------------
+- Ran centrifuge on cleaned FA_SC reads
+  (~/megadaph/decontamination/centrifuge/reads) and the D. magna reference
+assembly (~/megadaph/decontamination/centrifuge/reference_assembly). Used the 
+complete nt centrifuge database but excluded arthropods and bony fish. The 
+taxonomic IDs for these groups were found by examining
+~/megadaph/decontamination/centrifuge/custom_db/taxonomy/names.dmp. 
+
+
+===============================================================================
+August 22nd, 2017 - August 23rd, 2017
+===============================================================================
+- Constructed a custom centrifuge database using protocol from centrifuge 
+manual. All Bacterial, Plant, Protozoan, Archael and Fungal genomes classified 
+as 'Complete' by NCBI were included, as well as the human reference.
+
+===============================================================================
+August 23rd, 2017
+===============================================================================
+- Created an R package fen.R.util (https://github.com/fennerm/fen.R.util) to 
+house code shared between other R packages. Decided to make it separate to the
+bioinformatics_scripts repo since it will primarily be updated from my personal
+machine.  
+
+-------------------------------------------------------------------------------
+Preliminary Centrifuge Analysis Of D. magna reference assembly
+-------------------------------------------------------------------------------
+(~/megadaph/decontamination/centrifuge/reference_assembly)
+- Wrote R functions for adding taxonomic name, and match fraction to the 
+centrifuge output file.
+
+Taxa with strong evidence for contamination:
+- Thermus thermophilus (From Taq polymerase?)
+- Homo sapiens
+- Limnohabitans
+- Plant of some kind (hits to tomato, rice, cucumber etc.)
+- Parasitic worm (Trichobilharzia, Spirometra, Echinostoma, Protopolystoma,
+Schistosoma)
+
+===============================================================================
+August 24th, 2017
+===============================================================================
+-------------------------------------------------------------------------------
+Decontamination Strategy (to be continuously updated)
+-------------------------------------------------------------------------------
+- Identify confident contaminants with centrifuge and remove
+- Reassemble and run centrifuge on assembly
+- Use GC content and coverage to remove additional suspicious contigs
+(See Koutsovoulos et al., 2016)
+- Exclude contigs below 500bp
+(See Koutsovoulos et al., 2016)
+- Figure out plan for checking that assembly isn't overcleaned.
+- Check for differences in relative coverage between different starting control 
+assemblies!
+- Check for dramatic shifts in coverage across potential misassemblies
+
+===============================================================================
+August 25th, 2017
+===============================================================================
+Planned analysis:
+- Goal: Produce confidence metric for centrifuge classifications.
+- Strategy: Scramble all of the nucleotides in the fasta input to centrifuge. 
+Then run centrifuge. This will give us our expectations under the null.
+- Wrote a script to scramble all of the sequences in a multifasta file 
+(fmacrae/code/R/scripts/scramble_fasta.R)
+- Started test run of analysis on FA_SC in
+megadaph/decontamination/centrifuge/null_distribution
+- Found a bunch of false positive hits. A bunch to human, sheep, tomato etc. 
+Basically all large genomes. Largest hit score was only 289 though, so 
+filtering by score should be pretty easy and effective. 
