@@ -99,3 +99,12 @@ megadaph/decontamination/centrifuge/null_distribution
 - Found a bunch of false positive hits. A bunch to human, sheep, tomato etc. 
 Basically all large genomes. Largest hit score was only 289 though, so 
 filtering by score should be pretty easy and effective. 
+
+===============================================================================
+August 28th, 2017
+===============================================================================
+- Large reorganization of project github. Local and IBEST directories should
+now be kept fairly well in sync using github. Data will still reside only on
+IBEST.
+- Wrote the alignment function for the megadaph pipeline 
+(fmacrae/code/util/python_modules/run_bowtie2.py)
