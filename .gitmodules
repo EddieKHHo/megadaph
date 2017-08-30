@@ -1,0 +1,3 @@
+[submodule "pipeline/shared_modules"]
+	path = pipeline/shared_modules
+	url = git@github.com:fennerm/bioinformatics_scripts.git
