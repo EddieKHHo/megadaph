@@ -4,6 +4,7 @@
 *.Ruserdata
 *.Rbuildignore
 *.Rproj
+*.swp
 /data/
 /megadaph.nuc/data/
 /megadaph.nuc/data-raw/
