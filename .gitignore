@@ -6,6 +6,7 @@
 *.Rproj
 *.swp
 *.pyc
+*.egg-info
 /data/
 /megadaph.nuc/data/
 /megadaph.nuc/data-raw/

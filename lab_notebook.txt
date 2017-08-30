@@ -115,3 +115,9 @@ August 29th, 2017
 - Added run_index_fasta module to the Megadaph decontamination pipeline.
 - Added CheckedArgs class module to validate arguments passed to the pipeline.
 - Added unit tests directory, and got testing working for CheckedArgs
+
+===============================================================================
+August 30th, 2017
+===============================================================================
+- Setup my personal python modules as a package (fmbiopy) for easier import and
+  extensibility.
