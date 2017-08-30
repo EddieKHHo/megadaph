@@ -17,7 +17,9 @@ class CheckedArgs:
     def set_assemblies(self, args):
         assemblies = sorted(args['<assembly>'])
 
-        if any_dont_exist(assemblies): 
+        if not assemblies:
+            raise ValueError("No assemblies found")
+        elif any_dont_exist(assemblies): 
             raise ValueError("Invalid assembly argument") 
         else:
             return assemblies
@@ -30,11 +32,14 @@ class CheckedArgs:
     #   be found.
     def match_reads(self, args):
         read_dir = args['<read_dir>']
+        # Get the sample prefixes from the assemblies
         prefixes = map(prefix, self.assemblies)
         prefixes = map(os.path.basename, prefixes)
 
         fwd = []
         rev = []
+
+        # Match each prefix to the sample's forward and reverse reads
         for pre in prefixes:
             prefixed_read_dir = os.path.join(read_dir, pre)
 

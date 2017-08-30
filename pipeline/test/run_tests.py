@@ -13,9 +13,10 @@ if __name__ == '__main__':
     for i in range(len(test_modules)):
         test_modules[i] = test_modules[i][:-3]
     
+    # Define the test suite
     suite = unittest.TestSuite()
-
     for t in test_modules:
         suite.addTest(unittest.defaultTestLoader.loadTestsFromName(t))
 
+    # Run all tests
     unittest.TextTestRunner().run(suite)
