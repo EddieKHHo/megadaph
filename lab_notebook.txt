@@ -108,3 +108,10 @@ now be kept fairly well in sync using github. Data will still reside only on
 IBEST.
 - Wrote the alignment function for the megadaph pipeline 
 (fmacrae/code/util/python_modules/run_bowtie2.py)
+
+===============================================================================
+August 29th, 2017
+===============================================================================
+- Added run_index_fasta module to the Megadaph decontamination pipeline.
+- Added CheckedArgs class module to validate arguments passed to the pipeline.
+- Added unit tests directory, and got testing working for CheckedArgs
