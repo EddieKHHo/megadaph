@@ -5,6 +5,7 @@
 *.Rbuildignore
 *.Rproj
 *.swp
+*.pyc
 /data/
 /megadaph.nuc/data/
 /megadaph.nuc/data-raw/
