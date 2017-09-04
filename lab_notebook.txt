@@ -32,32 +32,32 @@ Activity Log for today:
 -------------------------------------------------------------------------------
 - Ran centrifuge on cleaned FA_SC reads
   (~/megadaph/decontamination/centrifuge/reads) and the D. magna reference
-assembly (~/megadaph/decontamination/centrifuge/reference_assembly). Used the 
-complete nt centrifuge database but excluded arthropods and bony fish. The 
+assembly (~/megadaph/decontamination/centrifuge/reference_assembly). Used the
+complete nt centrifuge database but excluded arthropods and bony fish. The
 taxonomic IDs for these groups were found by examining
-~/megadaph/decontamination/centrifuge/custom_db/taxonomy/names.dmp. 
+~/megadaph/decontamination/centrifuge/custom_db/taxonomy/names.dmp.
 
 
 ===============================================================================
 August 22nd, 2017 - August 23rd, 2017
 ===============================================================================
-- Constructed a custom centrifuge database using protocol from centrifuge 
-manual. All Bacterial, Plant, Protozoan, Archael and Fungal genomes classified 
+- Constructed a custom centrifuge database using protocol from centrifuge
+manual. All Bacterial, Plant, Protozoan, Archael and Fungal genomes classified
 as 'Complete' by NCBI were included, as well as the human reference.
 
 ===============================================================================
 August 23rd, 2017
 ===============================================================================
-- Created an R package fen.R.util (https://github.com/fennerm/fen.R.util) to 
+- Created an R package fen.R.util (https://github.com/fennerm/fen.R.util) to
 house code shared between other R packages. Decided to make it separate to the
 bioinformatics_scripts repo since it will primarily be updated from my personal
-machine.  
+machine.
 
 -------------------------------------------------------------------------------
 Preliminary Centrifuge Analysis Of D. magna reference assembly
 -------------------------------------------------------------------------------
 (~/megadaph/decontamination/centrifuge/reference_assembly)
-- Wrote R functions for adding taxonomic name, and match fraction to the 
+- Wrote R functions for adding taxonomic name, and match fraction to the
 centrifuge output file.
 
 Taxa with strong evidence for contamination:
@@ -81,7 +81,7 @@ Decontamination Strategy (to be continuously updated)
 - Exclude contigs below 500bp
 (See Koutsovoulos et al., 2016)
 - Figure out plan for checking that assembly isn't overcleaned.
-- Check for differences in relative coverage between different starting control 
+- Check for differences in relative coverage between different starting control
 assemblies!
 - Check for dramatic shifts in coverage across potential misassemblies
 
@@ -90,15 +90,15 @@ August 25th, 2017
 ===============================================================================
 Planned analysis:
 - Goal: Produce confidence metric for centrifuge classifications.
-- Strategy: Scramble all of the nucleotides in the fasta input to centrifuge. 
+- Strategy: Scramble all of the nucleotides in the fasta input to centrifuge.
 Then run centrifuge. This will give us our expectations under the null.
-- Wrote a script to scramble all of the sequences in a multifasta file 
+- Wrote a script to scramble all of the sequences in a multifasta file
 (fmacrae/code/R/scripts/scramble_fasta.R)
 - Started test run of analysis on FA_SC in
 megadaph/decontamination/centrifuge/null_distribution
-- Found a bunch of false positive hits. A bunch to human, sheep, tomato etc. 
-Basically all large genomes. Largest hit score was only 289 though, so 
-filtering by score should be pretty easy and effective. 
+- Found a bunch of false positive hits. A bunch to human, sheep, tomato etc.
+Basically all large genomes. Largest hit score was only 289 though, so
+filtering by score should be pretty easy and effective.
 
 ===============================================================================
 August 28th, 2017
@@ -106,7 +106,7 @@ August 28th, 2017
 - Large reorganization of project github. Local and IBEST directories should
 now be kept fairly well in sync using github. Data will still reside only on
 IBEST.
-- Wrote the alignment function for the megadaph pipeline 
+- Wrote the alignment function for the megadaph pipeline
 (fmacrae/code/util/python_modules/run_bowtie2.py)
 
 ===============================================================================
@@ -120,4 +120,33 @@ August 29th, 2017
 August 30th, 2017
 ===============================================================================
 - Setup my personal python modules as a package (fmbiopy) for easier import and
-  extensibility.
+extensibility.
+	- Using pytest for package testing (https://docs.pytest.org/en/latest/)
+
+- Plan to set up fmbiopy and bioinformatics_scripts as subtrees of the Megadaph
+repository, but the version of git on IBEST is super out of date. Messaged
+Benji about getting a new version. Will use
+https://medium.com/@porteneuve/mastering-git-subtrees-943d29a798ec as a guide
+for subtree set up.
+
+===============================================================================
+August 31st, 2017
+===============================================================================
+- Fixed bugs in run_bowtie2.py, run_index_fasta.py and fen_util.run_command().
+All tests now passing
+- Came up with an object oriented pipeline structure. Basically will define
+pipeline and submodule classes which will automatically handle argument
+passing, logging and argument checking.
+- Benji made an updated git module but its only available for some of the
+servers until they update the rest. Don't know how long this will take but I'll
+put off getting the subtree properly set up for the time being
+- Read about pytest features:
+http://pythontesting.net/framework/pytest/pytest-fixtures-nuts-bolts/#bare
+
+===============================================================================
+September 3rd, 2017
+===============================================================================
+- Partially created BioFileGroup class for housing and type checking
+bioinformatics files within the pipeline (~/fmacrae/code/fmbiopy/fmbiopy.py).
+Some tests still failing. Tomorrow will start by refactoring the prevalidation
+functions.
