@@ -150,3 +150,14 @@ September 3rd, 2017
 bioinformatics files within the pipeline (~/fmacrae/code/fmbiopy/fmbiopy.py).
 Some tests still failing. Tomorrow will start by refactoring the prevalidation
 functions.
+
+===============================================================================
+September 4th, 2017
+===============================================================================
+- Added a bunch of classes to BioFileGroup.
+
+===============================================================================
+September 5th, 2017
+===============================================================================
+- Added further classes to BioFileGroup. Now just need to implement an
+IndexedFasta class and I can move onto the pipeline code.
