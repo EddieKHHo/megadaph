@@ -5,6 +5,7 @@
 *.Rbuildignore
 *.Rproj
 *.swp
+*.cache
 *.pyc
 *.egg-info
 /data/

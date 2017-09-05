@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import os
-from fen_util import any_dont_exist, prefix
+from decontam_pipeline.fmbiopy.fmbiopy.fen_util import any_dont_exist, prefix
 from glob import glob
 
 class CheckedArgs:
