@@ -161,3 +161,49 @@ September 5th, 2017
 ===============================================================================
 - Added further classes to BioFileGroup. Now just need to implement an
 IndexedFasta class and I can move onto the pipeline code.
+- IndexedFasta implemented. Documentation could still use a little work but
+biofile.py is basically complete.
+- Installed pydocstring plugin for easy documentation in reST formatting. Call
+with :Pydocstring in vim while cursor is on function or class definition.
+- Thought a lot about what docstring style to use from now on. Decided on numpy
+style for the following reasons:
+	- Ease of reading
+	- Can use 'pyment -wo "numpydoc" <file.py>' to automate much of the process
+	- Can be converted into documentation with Sphinx
+	- Guidelines:
+	  http://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_numpy.html
+
+===============================================================================
+September 6th, 2017
+===============================================================================
+- Think I might have reinvented the wheel a bit with biofile. Ruffus seems like
+it includes the same functionality and more.
+- New plan: Next step rewrite bowtie2_align.py and index_fasta.py as ruffus
+functions
+- Interrupted while working: currently working on editing the .vimrc to auto-
+open split tabs with python environment
+
+===============================================================================
+September 7th, 2017
+===============================================================================
+- Officially switched over to Ruffus for pipelining.
+- Set up Ruffus logging class in fmbiopy.fmruffus
+
+===============================================================================
+September 10th, 2017
+===============================================================================
+- Wrote and tested following tasks in fmbiopy.ruffus_tasks: bowtie_index_fasta,
+samtools_index_fasta, gunzip, gzip, paired_bowtie2_align
+
+===============================================================================
+September 11th, 2017
+===============================================================================
+- Spent a while trying to get jedi-vim to play nice with vim 8 and pyenv.
+Eventually got it to work by adding a script to .vim/after/ftplugin/python.vim,
+and adding an __init__.py to fmbiopy.fmbiopy
+- Started on the decontam_pipeline proper in
+  'fmacrae/megadaph/decontam_pipeline'. Decided to structure as a script rather
+than a package.
+- Started adding some additional functionality to biofile, so that it can be
+used for checking argument validity in the pipeline.
+
