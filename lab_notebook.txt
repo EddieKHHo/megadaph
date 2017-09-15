@@ -207,3 +207,32 @@ than a package.
 - Started adding some additional functionality to biofile, so that it can be
 used for checking argument validity in the pipeline.
 
+===============================================================================
+September 13th, 2017
+===============================================================================
+- Ideas from meeting
+- Primers arrived
+- Meeting with Sarah: Updated on progress. We shared a little concern about
+Emily using hard GC content/coverage cutoffs for filtering contamination in the
+assemblies. She showed me Emily's assembly stats though and they were super
+impressive. Very large N50s and a pretty consistent total assembly length
+~130-180 Mb.
+- Lab meeting: Introductions - my presentation slot set for Nov. 29th
+- Met with Emily about assembly progress. We talked about the hard cutoff
+criteria issue. I suggested running the published reference genome through her
+filter and see how much is lost. A nontrivial amount was excluded - large
+enough that I would be uncomfortable using these filters for the mutation
+calling pipeline. However we agreed they are probably fine for the TE detection
+if she is comfortable with them. Given her timeframe, she probably doesn't have
+the time to work at my snailpace. I asked her about her assembly parameters so
+that I could eventually include them in the Ruffus pipeline.
+- Basic plan for PCR amp. of control region:
+
+To determine correct PCR parameters:
+- Extract fresh DNA from a G/I line and an F line using Zymo kit.
+- Figure out elongation time/annealing temp for primers
+- Try both sets of primers to ensure that we can amplify control region.
+
+For real samples:
+- Ask Maia where DNA samples are stored in freezer
+
