@@ -228,11 +228,4 @@ the time to work at my snailpace. I asked her about her assembly parameters so
 that I could eventually include them in the Ruffus pipeline.
 - Basic plan for PCR amp. of control region:
 
-To determine correct PCR parameters:
-- Extract fresh DNA from a G/I line and an F line using Zymo kit.
-- Figure out elongation time/annealing temp for primers
-- Try both sets of primers to ensure that we can amplify control region.
-
-For real samples:
-- Ask Maia where DNA samples are stored in freezer
 
