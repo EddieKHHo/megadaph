@@ -226,6 +226,33 @@ calling pipeline. However we agreed they are probably fine for the TE detection
 if she is comfortable with them. Given her timeframe, she probably doesn't have
 the time to work at my snailpace. I asked her about her assembly parameters so
 that I could eventually include them in the Ruffus pipeline.
-- Basic plan for PCR amp. of control region:
 
+
+===============================================================================
+September 24th, 2017
+===============================================================================
+Been having troubles getting vim and pyenv to work with the new server
+infrastructure which Benji is updating. Recompiled vim with following commands:
+
+pyenv local 3.5.2
+
+./configure --prefix=$HOME --with-features=huge --enable-multibyte
+--enable-cscope=yes ---enable-pythoninterp=dynamic
+--with-python3-config-dir=/opt/modules/devel/python/2.7.10/lib/python2.7/config
+--enable-python3interp=dynamic
+--with-python3-config-dir=/opt/modules/devel/python/3.5.2/lib/python3.5/config-3.5m/
+--disable-gui
+
+make VIMRUNTIMEDIR=$HOME/.vim
+
+This worked to get vim working with python3 sort of, but broke python2. Also
+syntax highlighting stopped working.
+
+Decided to just switch to Neovim to avoid these issues. First installed
+linuxbrew. Linuxbrew complained about our git version being out of date.
+Attempted to update it using 'linuxbrew install git', but its throwing the
+following error:
+
+/mnt/lfs2/schaack/.linuxbrew/bin/ld: cannot find -ldb
+collect2: error: ld returned 1 exit status
 
