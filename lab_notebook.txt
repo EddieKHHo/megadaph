@@ -256,3 +256,7 @@ following error:
 /mnt/lfs2/schaack/.linuxbrew/bin/ld: cannot find -ldb
 collect2: error: ld returned 1 exit status
 
+===============================================================================
+September 25th, 2017
+===============================================================================
+Installed a brewed version of perl with linuxbrew.
