@@ -260,3 +260,8 @@ collect2: error: ld returned 1 exit status
 September 25th, 2017
 ===============================================================================
 Installed a brewed version of perl with linuxbrew.
+
+===============================================================================
+September 27th, 2017
+===============================================================================
+Installed brewed versions of git and neovim.
