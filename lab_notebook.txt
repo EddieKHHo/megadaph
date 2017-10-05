@@ -265,3 +265,32 @@ Installed a brewed version of perl with linuxbrew.
 September 27th, 2017
 ===============================================================================
 Installed brewed versions of git and neovim.
+
+===============================================================================
+September 28th, 2017
+===============================================================================
+Neovim up and running. Installed vim-plug for managing plugins. Added Ale for
+syntax checking and vim-test for testing code in nvim.
+
+===============================================================================
+September 29th, 2017
+===============================================================================
+Refactored my dotfile set up so that my custom dotfiles are copied over ssh
+upon login. This means that any changes to my dotfiles wont affect other users
+and can also be more easily transferred to new servers.
+
+Finally got neovim to run entirely without errors with my setup.
+
+===============================================================================
+October 2nd, 2017
+===============================================================================
+Spent all day bug fixing the decontamination pipeline
+
+===============================================================================
+October 4th, 2017
+===============================================================================
+Finally finished bugfixing on fmruffus module. Architecture for running Ruffus
+tasks is now pretty solid. Should now be fairly simple to add new Ruffus tasks.
+Next step is to get a basic pipeline running with just the initial Bowtie2
+alignment to get a feel for how Ruffus pipeline scripts work.
+pipeline script to start running.
