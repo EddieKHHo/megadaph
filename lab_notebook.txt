@@ -289,8 +289,17 @@ Spent all day bug fixing the decontamination pipeline
 ===============================================================================
 October 4th, 2017
 ===============================================================================
-Finally finished bugfixing on fmruffus module. Architecture for running Ruffus
-tasks is now pretty solid. Should now be fairly simple to add new Ruffus tasks.
-Next step is to get a basic pipeline running with just the initial Bowtie2
-alignment to get a feel for how Ruffus pipeline scripts work.
-pipeline script to start running.
+Finally finished major bugfixing on fmruffus module. Architecture for running
+Ruffus tasks is now pretty solid. Should now be fairly simple to add new
+Ruffus tasks. Next step is to get a basic pipeline running with just the
+initial Bowtie2 alignment to get a feel for how Ruffus pipeline scripts work.
+
+===============================================================================
+October 5th, 2017
+===============================================================================
+Minor bugfixes in fmruffus
+
+===============================================================================
+October 7th, 2017
+===============================================================================
+Bugfixing and refactoring in fmbiopy test functions
