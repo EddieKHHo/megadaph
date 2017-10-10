@@ -303,3 +303,19 @@ Minor bugfixes in fmruffus
 October 7th, 2017
 ===============================================================================
 Bugfixing and refactoring in fmbiopy test functions
+
+===============================================================================
+October 8th, 2017
+===============================================================================
+Started on the actual pipeline script. Got the bowtie2 alignment step working
+on small test files.
+
+===============================================================================
+October 9th, 2017
+===============================================================================
+Got a little stuck in the mud refactoring biofile. Decided that it makes more
+sense to have the base class be a singular Biofile rather than a BiofileGroup.
+Fixing this requires moving the bulk of the validation steps into the new
+Biofile class and refactoring all of the non-generic BiofileGroup classes to
+singular Biofile classes. The generic BiofileGroup will stick around as a way
+to store a set of Biofiles, and do validation checks which pertain to groups.
