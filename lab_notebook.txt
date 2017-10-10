@@ -319,3 +319,8 @@ Fixing this requires moving the bulk of the validation steps into the new
 Biofile class and refactoring all of the non-generic BiofileGroup classes to
 singular Biofile classes. The generic BiofileGroup will stick around as a way
 to store a set of Biofiles, and do validation checks which pertain to groups.
+
+===============================================================================
+October 10th, 2017
+===============================================================================
+Worked on biofile refactoring
