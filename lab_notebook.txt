@@ -324,3 +324,10 @@ to store a set of Biofiles, and do validation checks which pertain to groups.
 October 10th, 2017
 ===============================================================================
 Worked on biofile refactoring
+
+===============================================================================
+October 11th, 2017
+===============================================================================
+Biofile refactoring mostly done. Generic Biofile class now works, as do Fasta
+and Fastq. Commented out BiofileGroups and MatchedPrefixGroups for now. Will
+fix them later if they end up being useful.
