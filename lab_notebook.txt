@@ -331,3 +331,17 @@ October 11th, 2017
 Biofile refactoring mostly done. Generic Biofile class now works, as do Fasta
 and Fastq. Commented out BiofileGroups and MatchedPrefixGroups for now. Will
 fix them later if they end up being useful.
+
+Created small Bam and Sam files with 10000 reads in testdat by subsampling
+megadaph data with samtools.
+
+===============================================================================
+October 12th, 2017
+===============================================================================
+-Created small paired fastq files with 10000 reads by subsampling the megadaph
+reads with seqtk for use in testdat.
+-Did the same thing (1000 contigs) with the September 2017 redundans Megadaph
+assemblies.
+-Cloned the new testdat repository into fmbiopy and the megadaph
+decontam_pipeline.
+-Rewrote fmbiopy functions which rely on testdat
