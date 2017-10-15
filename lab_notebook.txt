@@ -345,3 +345,10 @@ assemblies.
 -Cloned the new testdat repository into fmbiopy and the megadaph
 decontam_pipeline.
 -Rewrote fmbiopy functions which rely on testdat
+
+===============================================================================
+October 14th, 2017
+===============================================================================
+- Switched from os.path to pathlib.Path for path manipulation in fmbiopy.
+- Added BiofileGroup and MatchedPrefixGroup classes back to fmbiopy.biofile
+- Worked on input file validation in megadaph pipeline
