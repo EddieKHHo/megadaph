@@ -9,6 +9,12 @@
 *.pyc
 *.egg-info
 /data/
+/decontam_pipeline/fmbiopy
+/decontam_pipeline/test/testdat
 /megadaph.nuc/data/
 /megadaph.nuc/data-raw/
 .Rproj.user
+*.log
+.mypy_cache
+.ruffus_history.sqlite
+
