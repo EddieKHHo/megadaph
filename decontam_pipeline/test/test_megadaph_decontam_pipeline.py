@@ -1,5 +1,5 @@
 """Test the Megadaph Decontamination Pipeline using py.test"""
-import os
+from uuid import uuid4
 
 from docopt import docopt
 import pytest
@@ -31,17 +31,56 @@ def opts():
     subdirs = ['assemblies', 'fwd_reads', 'rev_reads']
     paths = [str((location / d).resolve()) for d in subdirs]
     return {
-            '<nthreads>' : 16,
+            '--threads' : 1,
             '--assemblies' : paths[0],
             '--fwd_reads' : paths[1],
-            '--rev_reads' : paths[2]}
+            '--rev_reads' : paths[2],
+            '--flowchart' : False,
+            '--just-print' : False,
+            '--help' : False}
+
+
+@pytest.fixture()
+def print_only_opts(opts):
+    opts['--just-print'] = True
+    return opts
+
+
+@pytest.fixture()
+def flowchart_only_opts(print_only_opts):
+    print_only_opts['--flowchart'] = 'sandbox/flow.svg'
+    return print_only_opts
+
 
 @pytest.fixture()
 def zipped_dat_inputs(dat):
     return list(zip(
-        dat['small']['assemblies'],
-        dat['small']['fwd_reads'],
-        dat['small']['rev_reads']))
+        sorted(dat['small']['assemblies']),
+        sorted(dat['small']['fwd_reads']),
+        sorted(dat['small']['rev_reads'])))
+
+
+@pytest.fixture()
+def uid():
+    return uuid4().hex
+
 
 def test_check_input_files(opts, zipped_dat_inputs):
     assert pipe._extract_input_files(opts) == zipped_dat_inputs
+
+
+def test_flowchart_only(flowchart_only_opts, uid):
+    pipe._main(flowchart_only_opts, name=uid)
+    assert Path(flowchart_only_opts['--flowchart']).exists()
+
+
+def test_print_only(print_only_opts, uid):
+    pytest.set_trace()
+    pipe._main(print_only_opts, name=uid)
+
+
+def test_logging():
+    pass
+
+# def test_run_pipeline(opts):
+#     _main(opts)

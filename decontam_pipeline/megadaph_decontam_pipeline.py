@@ -7,11 +7,11 @@ Pipeline steps are as follows:
     Index Fasta Files -> Align Fastq files ->
 
 Usage:
-    megadaph_decontam_pipeline.py [--flowchart=<file.svg>] [--verbose] \
-    --threads=<n> --assemblies=<directory> --fwd_reads=<directory> \
-    --rev_reads=<directory>
+    megadaph_decontam_pipeline.py [--flowchart=<file.svg>] [--verbose]
+        [--just-print] (--threads=<n>) (--assemblies=<directory>)
+        (--fwd_reads=<directory>) (--rev_reads=<directory>)
     megadaph_decontam_pipeline.py (-h | --help)
-    megadaph_decontam_pipeline.py (-j | --just-print)
+
 
 Options:
     -h --help  Show this screen
@@ -40,6 +40,7 @@ Notes:
 """
 
 from pathlib import Path
+from typing import Any
 from typing import Dict
 from typing import List
 from typing import Tuple
@@ -79,7 +80,7 @@ def _validate_args(
         assemblies: List[Path],
         fwd_reads: List[Path],
         rev_reads: List[Path],
-        )-> bool:
+        )-> None:
     """Check that the given input files are valid
 
     Paired fastq files must share the same prefix and use .1/.2 to distinguish
@@ -91,10 +92,6 @@ def _validate_args(
         The user inputted fastq file paths
     assemblies
         The user inputted assembly files
-
-    Returns
-    -------
-    True if successful.
     """
 
     inputs = [fwd_reads, rev_reads, assemblies]
@@ -104,26 +101,34 @@ def _validate_args(
         biofile.BiofileGroup(rev_reads, filetype='fastq', gzipped=gzipped[1]),
         biofile.BiofileGroup(assemblies, filetype='fasta', gzipped=gzipped[2])
         ]).validate()
-    return True
 
 
-def _extract_input_files(opt: Dict[str, str]) -> List[Tuple[Path, Path, Path]]:
-    """Process command line arguments
+def _extract_input_files(
+        opt: Dict[str, Any]
+        )-> List[Tuple[Path, Path, Path]]:
+    """Extract the input files from the given directories
 
     Input file prefixes are checked to ensure they can be matched correctly and
     have the correct file extensions.
 
+    Parameters
+    ----------
+    opt
+        A dictionary of parsed input parameters formatted as in `docopt`
+
     Returns
     -------
-    Dict[str, List[str]]
-        A dictionary of the given input files
+    A dictionary of the given input files. Returns None if no input files were
+    given.
     """
 
     # Gather the inputs
-    inputs: List[str] = [
+    inputs = [
             opt['--assemblies'], opt['--fwd_reads'], opt['--rev_reads']]
-    # Convert to Paths
-    paths = [Path(direc).resolve() for direc in inputs]
+
+    # Extract input files
+    input_dirs = [Path(d).resolve() for d in inputs]
+
     # The expected filetypes
     extensions = [
             biofile.Fasta.accepted_extensions,
@@ -134,7 +139,7 @@ def _extract_input_files(opt: Dict[str, str]) -> List[Tuple[Path, Path, Path]]:
 
     # Get the paths to all input files
     file_paths: List[List[Path]] = []
-    for path, typ, substring in zip(paths, extensions, substrings):
+    for path, typ, substring in zip(input_dirs, extensions, substrings):
         file_paths.append(fmpaths.find(path, typ, substring))
 
     assemblies = file_paths[0]
@@ -145,31 +150,69 @@ def _extract_input_files(opt: Dict[str, str]) -> List[Tuple[Path, Path, Path]]:
     return list(zip(assemblies, fwd_reads, rev_reads))
 
 
-def _main() -> bool:
-    """Main function
+def _define_pipeline(
+        input_files: List[Tuple[Path, Path, Path]],
+        name: str,
+        )-> ruffus.Pipeline:
+    """Define the pipeline
+
+    Parameters
+    ----------
+    input_files
+        Input files produced by `_extract_input_files`
+    name
+        The name of the pipeline
 
     Returns
     -------
-    True if runs without error
+    The pipeline definition
     """
-    opt = docopt(__doc__)
-    input_files = _extract_input_files(opt)
+    path_strings = [fmpaths.as_str(paths) for paths in input_files]
+    # Define the pipeline
+    pipe = ruffus.Pipeline(name=name)
 
-    # Get suffix of the fasta files, so that we can determine the output name
-    fasta_suffix = input_files[0][0].suffix
-
-    # Pipeline start
-    pipe = ruffus.Pipeline(name="decontam")
+    # Add symlink step
     pipe.transform(
             task_func=fmruffus.PairedBowtie2Align,
             name='alignment',
-            filter=ruffus.suffix(fasta_suffix),
-            input=input_files,
-            output='.bam',
+            filter=ruffus.suffix('fasta'),
+            input=path_strings,
+            output='bam',
             output_dir='PairedBowtie2align')
-    pipe.run()
-    return True
+    return pipe
 
+
+def _main(opt: Dict[str, Any], name: str = 'decontam') -> None:
+    """Main function
+
+    Parse the command line arguments and decide how to proceed. Either run the
+    pipeline, print the pipeline, and/or produce a flowchart.
+
+    Parameters
+    ----------
+    opt
+        A dictionary of parsed input parameters formatted as in `docopt`
+    name: Optional
+        The name of the pipeline
+    """
+    # Unpack the arguments
+    if opt['--threads']:
+        nthreads = int(opt['--threads'])
+
+    input_files = _extract_input_files(opt)
+
+    pipe = _define_pipeline(input_files, name=name)
+
+    if opt['--flowchart']:
+        pipe.printout_graph(opt['--flowchart'])
+
+    if opt['--just-print']:
+        pipe.printout()
+    elif input_files:
+        pipe.run(
+            multithread=nthreads,
+            logger=fmruffus.ROOT_LOGGER)
 
 if __name__ == '__main__':
-    _main()
+    opt = docopt(__doc__)
+    _main(opt)
