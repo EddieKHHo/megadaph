@@ -352,3 +352,11 @@ October 14th, 2017
 - Switched from os.path to pathlib.Path for path manipulation in fmbiopy.
 - Added BiofileGroup and MatchedPrefixGroup classes back to fmbiopy.biofile
 - Worked on input file validation in megadaph pipeline
+
+===============================================================================
+October 15th, 2017
+===============================================================================
+- Got input validation working. Pipeline script now capable of producing a
+  flowchart representing the pipeline.
+- Added apply function to fmruffus which applies a single input RuffusTask to
+  multiple inputs.
