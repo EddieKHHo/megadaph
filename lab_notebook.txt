@@ -360,3 +360,18 @@ October 15th, 2017
   flowchart representing the pipeline.
 - Added apply function to fmruffus which applies a single input RuffusTask to
   multiple inputs.
+
+===============================================================================
+October 16th, 2017
+===============================================================================
+- Got test functions to work outside of the test directory. Can now be run from
+  the python package home folder.
+
+===============================================================================
+October 17th, 2017
+===============================================================================
+- Refactored, reorganized a bunch of fmbiopy code.
+- Alignment and symlink parts of pipeline now working.
+- Wrote RuffusTask for building a custom centrifuge index but didn't get time
+  to test it
+
