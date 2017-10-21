@@ -375,3 +375,27 @@ October 17th, 2017
 - Wrote RuffusTask for building a custom centrifuge index but didn't get time
   to test it
 
+===============================================================================
+October 18th, 2017
+===============================================================================
+- Bug fixed fmruffus.RuffusLog
+- Added fixtures to fmtest
+
+===============================================================================
+October 19th, 2017
+===============================================================================
+- Added RuffusTransform class and altered RuffusTask class to handle
+  ruffus.Pipeline.originate tasks.
+
+===============================================================================
+October 20th, 2017
+===============================================================================
+- Added centrifuge task to fmbiopy.fmruffus
+
+===============================================================================
+October 21st, 2017
+===============================================================================
+- Had to do a fresh linuxbrew install due to some persistent issues with
+  glibc6.
+- Wrote script for converting centrifuge output to blobtools compatible hits
+  file ('fmscripts/python/centrifuge_to_hits.py')
