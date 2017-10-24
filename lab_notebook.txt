@@ -399,3 +399,8 @@ October 21st, 2017
   glibc6.
 - Wrote script for converting centrifuge output to blobtools compatible hits
   file ('fmscripts/python/centrifuge_to_hits.py')
+
+===============================================================================
+October 24th, 2017
+===============================================================================
+- Improved fmpaths test coverage
