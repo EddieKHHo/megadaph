@@ -404,3 +404,14 @@ October 21st, 2017
 October 24th, 2017
 ===============================================================================
 - Improved fmpaths test coverage
+
+===============================================================================
+October 25-30th, 2017
+===============================================================================
+- Major connection difficulties with IBEST
+- Used the intermediate time to work on other project and improve my dotfiles.
+
+===============================================================================
+November 1st, 2017
+===============================================================================
+- Received assembly and read processing scripts from Emily.
