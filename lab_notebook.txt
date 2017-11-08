@@ -1,4 +1,4 @@
-Fenner Macrae Megadaph Lab Notebook
+Fenner Macrae Megadaph - Nuclear Analysis Lab Notebook
 ===============================================================================
 # vim: textwidth=79
 
@@ -415,3 +415,28 @@ October 25-30th, 2017
 November 1st, 2017
 ===============================================================================
 - Received assembly and read processing scripts from Emily.
+
+===============================================================================
+November 2nd, 2017
+===============================================================================
+- Started adding Emily's analyses to the pipeline. Everything should be fairly
+  easy except her script for removing heterozygosity. It explicitly repeats
+  the same protocol for each file rather than looping so it'll need to be
+  completely rewritten.
+
+===============================================================================
+November 4th-5th, 2017
+===============================================================================
+- Wrote Ruffus functions for all of Emily's tasks with the exception of the
+  custom script mentioned above.
+
+===============================================================================
+November 6th, 2017
+===============================================================================
+- Moved fmbiopy.fmruffus and fmbiopy.biofile into their own github repos.
+
+===============================================================================
+November 7th, 2017
+===============================================================================
+- Split duffus into multiple module files.
+
