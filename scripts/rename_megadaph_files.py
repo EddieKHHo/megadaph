@@ -21,7 +21,14 @@ def rename_megadaph_files(files: Sequence[str]):
         name = path.name
         unscore_split = name.split('_')
         sample = unscore_split[2]
-        pair = unscore_split[5]
+
+        # Check if file is a control, which have to be handled differently
+        if any(sub in name for sub in ['SC', 'EC']):
+            sample += unscore_split[3]
+            pair = unscore_split[6]
+        else:
+            pair = unscore_split[5]
+
         new_name = ''.join([sample, '.', pair, suffix])
         path.rename(new_name)
 
