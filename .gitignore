@@ -4,6 +4,7 @@
 *.Ruserdata
 *.Rbuildignore
 *.Rproj
+*.coverage
 *.swp
 *.cache
 *.pyc
@@ -12,6 +13,7 @@
 /decontam_pipeline/fmbiopy
 /decontam_pipeline/test/testdat
 pipe/
+testdat/
 /megadaph.nuc/data/
 /megadaph.nuc/data-raw/
 .Rproj.user
