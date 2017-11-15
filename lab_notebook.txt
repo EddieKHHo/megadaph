@@ -448,7 +448,21 @@ Found an interesting looking tool called HaploMerger2 which rebuilds both
 haploid assemblies from a heterozygous diploid assembly.
 
 ===============================================================================
-November 8th, 2017
+November 8th and 10th, 2017
 ===============================================================================
 - Worked on custom duffus Pipeline class.
 
+===============================================================================
+November 11th, 2017
+===============================================================================
+- The more time I spend looking at the Ruffus source code, the more I think its
+  pretty poorly constructed. I've been spending an awful amount of time getting
+  its Input-> Output formatter to work and I think its probably a waste of
+  time. Going to cut my losses and switch to an alternative pipelining
+  infrastructure. Snakemake seems like a good choice.
+
+===============================================================================
+November 14th, 2017
+===============================================================================
+- Made some good progress on the new snakemake pipeline. Got Emily's data set
+  up in the pipeline folder so we don't have to rebuild all of it.
