@@ -12,8 +12,6 @@
 /data/
 /decontam_pipeline/fmbiopy
 /decontam_pipeline/test/testdat
-pipe/
-devpipe/
 testdat/
 /megadaph.nuc/data/
 /megadaph.nuc/data-raw/
