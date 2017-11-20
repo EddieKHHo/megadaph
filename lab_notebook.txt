@@ -466,3 +466,47 @@ November 14th, 2017
 ===============================================================================
 - Made some good progress on the new snakemake pipeline. Got Emily's data set
   up in the pipeline folder so we don't have to rebuild all of it.
+
+===============================================================================
+November 15th, 2017
+===============================================================================
+- Started to test blobtools on a single file in
+  'megadaph.private/data/exploratory/decontam/blobtools'. Hoping to nail down
+  the blobtools part of the protocol here.
+
+===============================================================================
+November 16th, 2017
+===============================================================================
+- Decent portion of the exploratory blobtools pipeline finished. Currently
+  running the initial alignment and centrifuge steps on trillian.
+
+===============================================================================
+November 17th, 2017
+===============================================================================
+- Job got stuck on Trillian for some reason. Restarted on Ford.
+
+===============================================================================
+November 18th, 2017
+===============================================================================
+- Exploratory pipeline has produced most of the inputs to blobtools and is now
+  working on creating the blobtools database.
+- Added the trimming steps to the main snakemake pipeline but I'm running into
+  persistant syntax errors at the start of the script.
+
+===============================================================================
+November 19th, 2017
+===============================================================================
+- Blobtools is dependent on python2 but calls its submodules using 'python' so
+  it ends up defaulting to python3 and failing. I fixed this by replacing all
+  instances of python with python2 in the main script but a more intelligent
+  solution might be required for the main pipeline. Submitted an issue on
+  github.
+
+- Can't get the initial symlink step to work in the main snakemake pipeline.
+  Snakemake seems to have some trouble with symlinks in general so I'm just
+  going to remove the step for now.
+
+- Got the snakemake pipeline working all the way through to production of
+  multiqc files. Will start running it on the full dataset.
+
+- Got some initial blobplots from the blobplot pipeline.
