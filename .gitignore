@@ -12,6 +12,10 @@
 /data/
 /decontam_pipeline/fmbiopy
 /decontam_pipeline/test/testdat
+/decontam_pipeline/pipe
+/decontam_pipeline/devpipe
+!/decontam_pipeline/pipe/*.snake
+!/decontam_pipeline/devpipe/*.snake
 testdat/
 /megadaph.nuc/data/
 /megadaph.nuc/data-raw/

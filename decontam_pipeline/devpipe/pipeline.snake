@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """Megadaph Decontamination Pipeline"""
 
 from pathlib import Path
@@ -6,51 +5,53 @@ from pathlib import Path
 from fmbiopy.fmlist import as_strs
 
 # Script directory
-SCRIPTDIR = Path.home() / 'fmacrae' / 'code' / 'snakescripts'
+SCRIPTDIR = Path.home() / 'fmacrae' / 'code' / 'snakescripts' / 'snakescripts'
 
 # Adapters file
-ADAPTERS = "input/adapters"
+ADAPTERS = "input/adapters/adapters_illumina.fa"
 
 READSDIR = Path("input/reads")
 SAMPLE, PAIR = glob_wildcards("input/reads/{sample}.{pair}.fastq.gz")
 STARTCONTROL = [x for x in SAMPLE if 'SC' in x]
 
 rule all:
-    input:
-	expand('clean_fastqc/{sample}.html', sample=SAMPLE),
-	expand('clean_fastqc/{sample}.zip', sample=SAMPLE)
+	input:
+		'multiqc/multiqc.html',
+		'centdb/taxonomy/nodes.dmp'
 
-
-rule symlink_inputs:
-    input:
-        fwd_reads = 'input/reads/{sample}.R1.fastq.gz',
-        rev_reads = 'input/reads/{sample}.R2.fastq.gz'
-    output:
-		fwd_reads = '{rule}/{sample}.R1.fastq.gz',
-        rev_reads = '{rule}/{sample}.R2.fastq.gz'
-    script:
-        str(SCRIPTDIR / 'symlink_inputs.py')
+rule build_centrifuge_db:
+	output:
+		db_prefix = 'centdb/megadaph-custom',
+		nodes = 'centdb/taxonomy/nodes.dmp',
+		names = 'centdb/taxonomy/names.dmp'
+	params:
+		outdir = 'centdb'
+	threads: 10
+	script: 'scripts/centrifuge_download.py'
 
 
 rule raw_fastqc:
 	input:
-        fwd_reads = rules.symlink_inputs.output.fwd_reads,
-        rev_reads = rules.symlink_inputs.output.rev_reads
-    output:
-		out_html = '{rule}/{sample}.html',
-		out_zip = '{rule}/{sample}.zip'
-    script:
-        str(SCRIPTDIR / 'fastqc.py')
+ 		fwd_reads = 'input/reads/{sample}.R1.fastq.gz',
+ 		rev_reads = 'input/reads/{sample}.R2.fastq.gz'
+	output:
+		'raw_fastqc/{sample}.R1_fastqc.html',
+		'raw_fastqc/{sample}.R2_fastqc.html',
+	params:
+		outdir = 'raw_fastqc'
+	script:
+
+		str(SCRIPTDIR / 'fastqc.py')
 
 
 rule trim_adapters:
 	input:
-        fwd_reads = rules.symlink_inputs.output.fwd_reads,
-        rev_reads = rules.symlink_inputs.output.rev_reads
+ 		fwd_reads = 'input/reads/{sample}.R1.fastq.gz',
+ 		rev_reads = 'input/reads/{sample}.R2.fastq.gz'
 	output:
-		fwd_reads = '{rule}/{sample}.R1.fastq.gz',
-		rev_reads = '{rule}/{sample}.R2.fastq.gz'
-	log: "{rule}/log/{sample}.log
+		fwd_reads = 'trim_adapters/{sample}.R1.fastq.gz',
+		rev_reads = 'trim_adapters/{sample}.R2.fastq.gz'
+	log: "trim_adapters/log/{sample}.log"
 	params:
 		ref = ADAPTERS,
 		k = '23',
@@ -61,39 +62,38 @@ rule trim_adapters:
 		"""
 		bbduk.sh in={input.fwd_reads} in2={input.rev_reads} \
 			out={output.fwd_reads} out2={output.rev_reads} ref={params.ref} \
-			k={params.k} ktrim={params.ktrim} mink={params.mink}
-			hdist={params.hdist} tpe tbo ?> {log}
+			k={params.k} ktrim={params.ktrim} mink={params.mink} \
+			hdist={params.hdist} tpe tbo 2> {log}
 		"""
 
 
-rule_error_correction:
+# rule error_correction:
+# 	input:
+# 		fwd_reads = rules.trim_adapters.output.fwd_reads,
+# 		rev_reads = rules.trim_adapters.output.rev_reads
+# 	output:
+# 		fwd_reads = 'error_correction/{sample}.R1.fastq.gz',
+# 		rev_reads = 'error_correction/{sample}.R2.fastq.gz',
+# 	log: "error_correction/log/{sample}.log"
+# 	params:
+# 		k = '50'
+# 	shell:
+# 		"""
+# 		tadpole.sh in={input.fwd_reads} in2={input.fwd_reads} \
+# 			out={output.fwd_reads} out2={output.rev_reads} k={params.k} \
+# 			mode=correct 2> {log}
+# 		"""
+
+rule merge_reads:
 	input:
 		fwd_reads = rules.trim_adapters.output.fwd_reads,
 		rev_reads = rules.trim_adapters.output.rev_reads
 	output:
-		fwd_reads = '{rule}/{sample}.R1.fastq.gz',
-		rev_reads = '{rule}/{sample}.R2.fastq.gz',
-	log: "{rule}/log/{sample}.log
-	params:
-		k = '50'
-	shell:
-		"""
-		tadpole.sh in={input.fwd_reads} in2={input.fwd_reads} \
-			out={output.fwd_reads} out2={output.rev_reads} k={params.k} \
-			mode=correct 2> {log}
-		"""
-
-
-rule merge_reads:
-	input:
-		fwd_reads = rules.error_correction.output.fwd_reads,
-		rev_reads = rules.error_correction.output.rev_reads
-	output:
-		fwd_reads = '{rule}/{sample}.R1.fastq.gz',
-		rev_reads = '{rule}/{sample}.R2.fastq.gz',
-		merged_reads = '{rule}/{sample}.merged.fastq.gz',
-		insert_hist = '{rule}/{sample}.hist'
-	log: "{rule}/log/{sample}.log
+		fwd_reads = 'merge_reads/{sample}.R1.fastq.gz',
+		rev_reads = 'merge_reads/{sample}.R2.fastq.gz',
+		merged_reads = 'merge_reads/{sample}.merged.fastq.gz',
+		insert_hist = 'merge_reads/{sample}.hist'
+	log: "merge_reads/log/{sample}.log"
 	params:
 		vstrict = 't'
 	shell:
@@ -107,16 +107,16 @@ rule merge_reads:
 
 rule quality_trim:
 	input:
-		fwd_reads = rules.merged_reads.output.fwd_reads,
-		rev_reads = rules.merged_reads.output.rev_reads,
-		merged_reads = rules.merged_reads.output.merged_reads
+		fwd_reads = rules.merge_reads.output.fwd_reads,
+		rev_reads = rules.merge_reads.output.rev_reads,
+		merged_reads = rules.merge_reads.output.merged_reads
 	output:
-		fwd_reads = '{rule}/{sample}.R1.fastq.gz',
-		rev_reads = '{rule}/{sample}.R2.fastq.gz',
-		merged_reads = '{rule}/{sample}.merged.fastq.gz'
+		fwd_reads = 'quality_trim/{sample}.R1.fastq.gz',
+		rev_reads = 'quality_trim/{sample}.R2.fastq.gz',
+		merged_reads = 'quality_trim/{sample}.merged.fastq.gz'
 	log:
-		paired: "{rule}/log/{sample}.paired.log,
-		unpaired: "{rule}/log/{sample}.unpaired.log
+		paired = "quality_trim/log/{sample}.paired.log",
+		unpaired = "quality_trim/log/{sample}.unpaired.log"
 	params:
 		qtrim = 'rl',
 		trimq = '20',
@@ -134,18 +134,26 @@ rule quality_trim:
 
 
 rule clean_fastqc:
-    input:
-        fwd_reads = rules.quality_trim.output.fwd_reads,
-        rev_reads = rules.quality_trim.output.rev_reads,
+	input:
+		fwd_reads = rules.quality_trim.output.fwd_reads,
+		rev_reads = rules.quality_trim.output.rev_reads,
 		merged_reads = rules.quality_trim.output.merged_reads
-    output:
-		out_html = '{rule}/{sample}.html'
-		out_zip = '{rule}/{sample}.zip'
-    script:
-        str(SCRIPTDIR / 'fastqc.py')
-
+	output:
+		'clean_fastqc/{sample}.R1_fastqc.html',
+		'clean_fastqc/{sample}.R2_fastqc.html',
+		'clean_fastqc/{sample}.merged_fastqc.html'
+	params:
+		outdir='clean_fastqc'
+	script:
+		'scripts/fastqc.py'
 
 rule multiqc:
-	output: {rule}/multiqc.html
+	input:
+		expand('clean_fastqc/{sample}.R1_fastqc.html', sample=SAMPLE),
+		expand('clean_fastqc/{sample}.R2_fastqc.html', sample=SAMPLE),
+		expand('clean_fastqc/{sample}.merged_fastqc.html', sample=SAMPLE),
+		expand('raw_fastqc/{sample}.R1_fastqc.html', sample=SAMPLE),
+		expand('raw_fastqc/{sample}.R2_fastqc.html', sample=SAMPLE)
+	output: 'multiqc/multiqc.html'
 	shell:
-		'multiqc -d -n {output}
+		'multiqc -d -n {output} .'
