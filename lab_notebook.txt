@@ -26,6 +26,9 @@ structure-and-no-gi-numbers/)
 
 - I also downloaded the prebuilt full nt database for Centrifuge
   (https://ccb.jhu.edu/software/centrifuge)
+===============================================================================
+November 19th, 2017
+===============================================================================
 
 -------------------------------------------------------------------------------
 Activity Log for today:
@@ -510,3 +513,11 @@ November 19th, 2017
   multiqc files. Will start running it on the full dataset.
 
 - Got some initial blobplots from the blobplot pipeline.
+
+===============================================================================
+November 20th, 2017
+===============================================================================
+- Wrote a script for downloading a new custom centrifuge database and added it
+  to the main snakemake pipeline.
+- Started running the pipeline on the actual datafiles. When(if) this completes
+  all fastq cleaning, QC and database downloading will be done.
