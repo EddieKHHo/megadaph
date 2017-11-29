@@ -10,11 +10,12 @@
 *.pyc
 *.egg-info
 /data/
-/decontam_pipeline/fmbiopy
-/decontam_pipeline/test/testdat
-/decontam_pipeline/pipe
-/decontam_pipeline/devpipe
-!/decontam_pipeline/pipe/*.snake
+decontam_pipeline/fmbiopy
+decontam_pipeline/test/testdat
+decontam_pipeline/pipe
+decontam_pipeline/devpipe
+/decontam_pipeline/pipe/input
+/decontam_pipeline/pipe/output
 testdat/
 /megadaph.nuc/data/
 /megadaph.nuc/data-raw/
