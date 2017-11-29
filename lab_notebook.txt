@@ -521,3 +521,74 @@ November 20th, 2017
   to the main snakemake pipeline.
 - Started running the pipeline on the actual datafiles. When(if) this completes
   all fastq cleaning, QC and database downloading will be done.
+
+===============================================================================
+November 21st, 2017
+===============================================================================
+- Centrifuge kept encountering time out errors while connecting to NCBI. Online
+  discussions suggested that this only occurs when centrifuge-download uses
+  rsync. Edited the binary in ~/bin to use curl instead. Main pipeline is now
+  running on Tesla.
+
+- Meanwhile I've been testing SLURM scheduling of the pipeline to see if this
+  leads to faster execution.
+
+===============================================================================
+November 22nd, 2017
+===============================================================================
+- Getting more errors with centrifuge-download. I'm going to split the
+  centrifuge database building part of the pipeline into multiple tasks so that
+  I don't have to start fresh each time it fails.
+
+===============================================================================
+November 23rd, 2017
+===============================================================================
+- Decided to rerun the exploratory blobtools pipeline with the entire nt
+  database. It probably makes more sense to filter out unrealistic hits
+  afterwards than spending too much time curating a custom database. Only thing
+  that I'm worried about is that the centrifuge docs are very ambiguous as to
+  the contents of their nt database. In the manual it says that the database
+  contains all 'spliced coding' sequence. However in their paper etc. they say
+  that its equivalent to the database used in BLAST.
+
+===============================================================================
+November 23rd, 2017
+===============================================================================
+- The main pipeline encountered errors in Fastqc building. This resulted from
+  my removal of run_command in my fmbiopy library. Moved Fastqc from a script
+  to a simple shell command, tested and resubmitted with SLURM.
+
+- Very unsatisfied with the output I'm getting from Centrifuge. Going to try
+  switching to BLAST for taxonomic assignment.
+
+
+===============================================================================
+November 27th, 2017
+===============================================================================
+- Got BLAST integrated into blobtools pipeline and running on slarti.
+
+===============================================================================
+November 28th, 2017
+===============================================================================
+- Fine tuned many aspects of exploratory pipeline - # BLAST hits per contig
+  increased from 1 to 10, added a simple filter script to remove obvious
+  contaminants. All done very messily to get done in time for presentation at
+  lab meeting. Will need to go over again later.
+
+- Tried to get Haplomerger2 set up. Its written very poorly so it'll take a lot
+  of work to get it up and running.
+
+
+-------------------------------------------------------------------------------
+Pipeline for decontamination
+-------------------------------------------------------------------------------
+- Assemble
+- Diploidify with haplomerger2
+- Align to assembly
+- blobtools pipeline
+- Group by taxonomy and Concoct.
+- Remove concoct groups which contain contaminants
+- Remove obvious contaminants
+- Possibly do a hard filter by coverage/GC if required
+- Reassemble
+
