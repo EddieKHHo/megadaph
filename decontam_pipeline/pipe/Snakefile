@@ -149,7 +149,7 @@ rule multiqc:
 
 rule initial_assembly:
     input:
-        fwd_reads = 'output/quality_trim/{sample}.R1.fastq.gz'
+        fwd_reads = 'output/quality_trim/{sample}.R1.fastq.gz',
         rev_reads = 'output/quality_trim/{sample}.R2.fastq.gz'
     params:
         threads='8',
