@@ -7,6 +7,9 @@ configfile: "config.yml"
 SAMPLE, PAIR = glob_wildcards(
         os.path.join(config['readsdir'], '{sample}.{pair}.fastq.gz'))
 
+# Remove duplicate entries
+SAMPLE = sorted(list(set(SAMPLE)))
+
 if config['isolates'] != 'all':
     # Only include samples from the specified isolates
     if len(config['isolates']) == 1:
