@@ -9,10 +9,11 @@
 *.cache
 *.pyc
 *.egg-info
+.snakemake/
+scripts
 /data/
 decontam_pipeline/fmbiopy
 decontam_pipeline/test/testdat
-decontam_pipeline/pipe
 decontam_pipeline/devpipe
 decontam_pipeline/pipe/input
 decontam_pipeline/pipe/output

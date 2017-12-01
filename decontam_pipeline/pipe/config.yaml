@@ -1,0 +1,6 @@
+---
+# Snakemake config
+isolates: all
+readsdir: input/reads
+adapters: input/adapters/adapters_illumina.fa
+threadsmax: 10
