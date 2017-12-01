@@ -19,7 +19,7 @@ STARTCONTROL = [x for x in SAMPLE if 'SC' in x]
 
 rule all:
     input:
-        'output/multiqc/multiqc.html'
+        'output/multiqc/multiqc.html', 'output/initial_assembly/{sample}.fasta'
 
 
 rule raw_fastqc:
