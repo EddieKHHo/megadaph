@@ -149,15 +149,13 @@ rule multiqc:
 
 rule initial_assembly:
     input:
-        fwd_reads = expand(
-            'output/quality_trim/{sample}.R1.fastq.gz', sample=STARTCONTROL),
-        rev_reads = expand(
-            'output/quality_trim/{sample}.R2.fastq.gz', sample=STARTCONTROL)
+        fwd_reads = 'output/quality_trim/{sample}.R1.fastq.gz'
+        rev_reads = 'output/quality_trim/{sample}.R2.fastq.gz'
     params:
         threads='8',
         output_dir='initial_assembly/{sample}_spades'
     output:
-        'output/initial_assembly/{sample}.fasta'
+        expand('output/initial_assembly/{sample}.fasta', sample=STARTCONTROL)
     shell:
         "python2 {config['spades_executable']} -1 {input.fwd_reads} -2 "
         "-2 {input.rev_reads} --threads {params.threads} -o "
