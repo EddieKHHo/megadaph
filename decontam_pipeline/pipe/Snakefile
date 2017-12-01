@@ -163,7 +163,7 @@ rule initial_assembly:
     output:
         'output/initial_assembly/{sample}.fasta'
     shell:
-            "python2 {config[spades_executable]} -1 {input.fwd_reads} -2 "
+        "python2 {config[spades_executable]} -1 {input.fwd_reads} -2 "
         "-2 {input.rev_reads} --threads {params.threads} -o "
         "{params.output_dir} &&"
         "mv {params.output_dir}/scaffolds.fasta {output}"
