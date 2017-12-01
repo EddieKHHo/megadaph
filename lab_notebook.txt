@@ -592,3 +592,13 @@ Pipeline for decontamination
 - Possibly do a hard filter by coverage/GC if required
 - Reassemble
 
+===============================================================================
+November 29th, 2017
+===============================================================================
+- Presented in lab meeting.
+
+===============================================================================
+November 30th, 2017
+===============================================================================
+- Started the initial SPADEs assemblies in the snakemake pipeline on SLURM.
+
