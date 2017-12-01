@@ -22,7 +22,8 @@ STARTCONTROL = [x for x in SAMPLE if 'SC' in x]
 
 rule all:
     input:
-        'output/multiqc/multiqc.html', 'output/initial_assembly/{sample}.fasta'
+        'output/multiqc/multiqc.html',
+        expand('output/initial_assembly/{sample}.fasta', sample=STARTCONTROL)
 
 
 rule raw_fastqc:
@@ -152,13 +153,15 @@ rule multiqc:
 
 rule initial_assembly:
     input:
-        fwd_reads = 'output/quality_trim/{sample}.R1.fastq.gz',
-        rev_reads = 'output/quality_trim/{sample}.R2.fastq.gz'
+        fwd_reads = expand(
+            'output/quality_trim/{sample}.R1.fastq.gz', sample=STARTCONTROL),
+        rev_reads = expand(
+            'output/quality_trim/{sample}.R2.fastq.gz', sample=STARTCONTROL)
     params:
         threads='8',
         output_dir='initial_assembly/{sample}_spades'
     output:
-        expand('output/initial_assembly/{sample}.fasta', sample=STARTCONTROL)
+        'output/initial_assembly/{sample}.fasta'
     shell:
         "python2 {config['spades_executable']} -1 {input.fwd_reads} -2 "
         "-2 {input.rev_reads} --threads {params.threads} -o "
