@@ -1,6 +1,5 @@
 Fenner Macrae Megadaph - Nuclear Analysis Lab Notebook
 ===============================================================================
-# vim: textwidth=79
 
 Logs of specific commands run can be found in analysis directories.
 
@@ -601,4 +600,11 @@ November 29th, 2017
 November 30th, 2017
 ===============================================================================
 - Started the initial SPADEs assemblies in the snakemake pipeline on SLURM.
+
+===============================================================================
+December 1st, 2017
+===============================================================================
+- Got haplomerger2 working on the provided test dataset. Had to install a bunch
+  of ucsc-* packages from bioconda, and add an old version of libpng to my
+  linker path.
 
