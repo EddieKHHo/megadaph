@@ -607,4 +607,3 @@ December 1st, 2017
 - Got haplomerger2 working on the provided test dataset. Had to install a bunch
   of ucsc-* packages from bioconda, and add an old version of libpng to my
   linker path.
-
