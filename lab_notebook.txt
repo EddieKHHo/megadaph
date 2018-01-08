@@ -607,3 +607,13 @@ December 1st, 2017
 - Got haplomerger2 working on the provided test dataset. Had to install a bunch
   of ucsc-* packages from bioconda, and add an old version of libpng to my
   linker path.
+
+===============================================================================
+December 22nd, 2017
+===============================================================================
+- The assemblies died to a memory error again after been queued for weeks. 
+  Upped the memory request to 100G and resubmitted.
+
+
+
+
