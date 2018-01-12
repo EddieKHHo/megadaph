@@ -608,3 +608,10 @@ December 1st, 2017
   of ucsc-* packages from bioconda, and add an old version of libpng to my
   linker path.
 
+===============================================================================
+January 12th, 2018
+===============================================================================
+- The SPADEs assemblies finally completed. They a long time due to congestion
+  on the server, but hopefully subsequent assemblies should be snappier.
+
+
