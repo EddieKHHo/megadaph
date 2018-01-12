@@ -12,11 +12,10 @@
 .snakemake/
 scripts
 /data/
-decontam_pipeline/fmbiopy
-decontam_pipeline/test/testdat
-decontam_pipeline/devpipe
-decontam_pipeline/pipe/input
-decontam_pipeline/pipe/output
+devpipe
+pipe/input
+pipe/output
+pipe/ref
 testdat/
 /megadaph.nuc/data/
 /megadaph.nuc/data-raw/
