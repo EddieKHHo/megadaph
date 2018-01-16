@@ -620,4 +620,12 @@ January 12th, 2018
 - The SPADEs assemblies finally completed. They a long time due to congestion
   on the server, but hopefully subsequent assemblies should be snappier.
 
-
+===============================================================================
+January 15th, 2018
+===============================================================================
+- Added bowtie2 alignment and BLAST search steps to the pipeline.
+- Went back and forth a lot on whether I should run Haplomerger2 before decontamination. Decided against it because: 1. It would reduce our
+decontamination sensitivity by half. 2. It would add a huge amount of processing time.
+- Instead we'll just have to be careful of removing heterozygous contigs during
+decontamination then attempt to build haploid assemblies afterwards. Some loss
+of heterozygous positions is probably inevitable though.
