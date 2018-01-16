@@ -3,5 +3,4 @@
 isolates: all
 readsdir: input/reads
 adapters: input/adapters/adapters_illumina.fa
-threadsmax: 10
-spades_executable: ~/bin/spades.py
+blast_database: ~/kayla_scratch/kayla_blast/db/nt/nt

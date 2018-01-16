@@ -1,10 +1,15 @@
 """Megadaph Decontamination Pipeline"""
 
 import os
+from shutil import rmtree
 
+# ==============================================================================
+# Set up
+# ==============================================================================
 configfile: "config.yml"
 
-SAMPLE, PAIR = glob_wildcards(os.path.join(config['readsdir'], '{sample}.{pair}.fastq.gz'))
+SAMPLE, PAIR = glob_wildcards(
+        os.path.join(config['readsdir'], '{sample}.{pair}.fastq.gz'))
 
 # Remove duplicate entries
 SAMPLE = sorted(list(set(SAMPLE)))
@@ -19,11 +24,41 @@ if config['isolates'] != 'all':
 
 STARTCONTROL = [x for x in SAMPLE if 'SC' in x]
 
+# ==============================================================================
+# Helper functions
+# ==============================================================================
+
+def get_starting_control(wildcards):
+    """Given a sample ID, return the ID of its starting control"""
+    return wildcards.sample[0:2] + "SC"
+
+
+def match_assembly(wildcards):
+    """Given the sample, return the starting control assembly"""
+    starting_control = get_starting_control(wildcards)
+    return os.path.join("output", "length_filter_assembly",
+                        starting_control + ".fasta")
+
+
+def match_assembly_index(wildcards):
+    """Given the sample, return the starting control assembly bowtie2 index"""
+    starting_control = get_starting_control(wildcards)
+    return os.path.join("output", "length_filter_assembly",
+                        starting_control + ".1.bt2")
+
+def bowtie2_idx_root(idx):
+  """Given the path to a forward bowtie2 index, return its root name"""
+  return os.path.splitext(os.path.splitext(idx)[0])[0]
+
+# ==============================================================================
+# Pipeline
+# ==============================================================================
 rule all:
     input:
         'output/multiqc/multiqc.html',
-        expand('output/initial_assembly/{sample}.fasta', sample=STARTCONTROL)
-
+        expand("output/blast_initial_assembly/{sample}.tsv",
+               sample=STARTCONTROL),
+        expand('output/align_to_initial_assembly/{sample}.bam', sample=SAMPLE)
 
 rule raw_fastqc:
     input:
@@ -58,23 +93,6 @@ rule trim_adapters:
         "k={params.k} ktrim={params.ktrim} mink={params.mink} "
         "hdist={params.hdist} tpe tbo 2> {log}"
 
-
-# rule error_correction:
-#   input:
-#       fwd_reads = rules.trim_adapters.output.fwd_reads,
-#       rev_reads = rules.trim_adapters.output.rev_reads
-#   output:
-#       fwd_reads = 'error_correction/{sample}.R1.fastq.gz',
-#       rev_reads = 'error_correction/{sample}.R2.fastq.gz',
-#   log: "error_correction/log/{sample}.log"
-#   params:
-#       k = '50'
-#   shell:
-#       """
-#       tadpole.sh in={input.fwd_reads} in2={input.fwd_reads} \
-#           out={output.fwd_reads} out2={output.rev_reads} k={params.k} \
-#           mode=correct 2> {log}
-#       """
 
 rule merge_reads:
     input:
@@ -154,14 +172,117 @@ rule initial_assembly:
     input:
         fwd_reads = 'output/quality_trim/{sample}.R1.fastq.gz',
         rev_reads = 'output/quality_trim/{sample}.R2.fastq.gz',
-	merged_reads = 'output/quality_trim/{sample}.merged.fastq.gz'
-    params:
-        threads='8',
-        output_dir='output/initial_assembly/{sample}_spades'
+	    merged_reads = 'output/quality_trim/{sample}.merged.fastq.gz'
     output:
-        'output/initial_assembly/{sample}.fasta'
+        assembly = 'output/initial_assembly/{sample}.fasta',
+        output_dir='output/initial_assembly/{sample}_spades'
+    threads: 8
     shell:
-        "python2 {config[spades_executable]} -1 {input.fwd_reads} -2 "
-        "{input.rev_reads} -s {input.merged_reads} --threads {params.threads} "
-	"-o {params.output_dir} && "
-        "mv {params.output_dir}/scaffolds.fasta {output}"
+        "python2 util/spades/bin/spades.py -1 {input.fwd_reads} -2 "
+        "{input.rev_reads} -s {input.merged_reads} --threads {threads} "
+	    "-o {output.output_dir} && "
+        "mv {output.output_dir}/scaffolds.fasta {output.assembly}"
+
+rule length_filter_assembly:
+    input:
+        'output/initial_assembly/{sample}.fasta'
+    output:
+        'output/length_filter_assembly/{sample}.fasta'
+    shell:
+        "bioawk -c fastx '{{ if(length($seq) > 200) {{ print \">\"$name; print "
+        "$seq }}}}' {input} > {output}"
+
+rule bowtie2_index_assembly:
+    input:
+        'output/length_filter_assembly/{sample}.fasta'
+    output:
+        'output/length_filter_assembly/{sample}.1.bt2'
+    shell:
+        "bowtie2-build {input} output/length_filter_assembly/{wildcards.sample}"
+
+rule align_to_initial_assembly:
+    input:
+        assembly = match_assembly,
+        index = match_assembly_index,
+        fwd_reads = 'output/quality_trim/{sample}.R1.fastq.gz',
+        rev_reads = 'output/quality_trim/{sample}.R2.fastq.gz',
+        merged_reads = 'output/quality_trim/{sample}.merged.fastq.gz'
+    output:
+        bam = 'output/align_to_initial_assembly/{sample}.bam',
+        bai = 'output/align_to_initial_assembly/{sample}.bam.bai'
+    threads: 10
+    log:
+        "output/align_to_initial_assembly/log/{sample}.log"
+    run:
+        index_prefix = bowtie2_idx_root(input.index)
+        shell("align_and_sort.py -1 {input.fwd_reads} -2 {input.rev_reads} -U "
+              "{input.merged_reads} -x " + index_prefix + " -p {threads} > "
+              "{output.bam} 2> {log}")
+        shell("samtools index {output.bai}")
+
+rule blast_initial_assembly:
+    input:
+        'output/length_filter_assembly/{sample}.fasta'
+    output:
+        "output/blast_initial_assembly/{sample}.tsv"
+    params:
+        ntdb = "input/nt/nt"
+    threads: 10
+    shell:
+        "blastn -db {config[blast_database]} -task megablast -max_target_seqs "
+        "5 -max_hsps 1 -evalue 1e-25 -query {input} -out {output} -outfmt "
+        "\"6 qseqid staxids bitscore std\" -num_threads {threads}"
+
+#rule redundans:
+#    input:
+#        assembly = 'output/initial_assembly/{sample}.fasta',
+#        fwd_reads = 'output/quality_trim/{sample}.r1.fastq.gz',
+#        rev_reads = 'output/quality_trim/{sample}.r2.fastq.gz',
+#        merged_reads = 'output/quality_trim/{sample}.merged.fastq.gz'
+#    output:
+#        'output/redundans/{sample}/scaffolds.filled.fa'
+#    params:
+#        threads = 10
+#    shell:
+#        "python2 util/redundans/redundans.py -f {assembly} -i "
+#        "{input.fwd_reads} {input.rev_reads} -l {input.merged_reads} "
+#        "-r {config[reference_assembly]} -o {output} -t {params.threads}"
+
+# rule create_haplomerger_project:
+#     input:
+#         'output/initial_assembly/{sample}.fasta'
+#     output:
+#         'util/haplomerger2/{sample}'
+#     run:
+#         if os.path.isdir(output[0]):
+#             rmtree(output[0])
+#         shell("cp -r util/haplomerger2/template "
+#               "util/haplomerger2/{wildcards.sample}")
+#
+# rule softmask_assembly:
+#     input:
+#         projdir = 'util/haplomerger2/{sample}',
+#         assembly = 'output/initial_assembly/{sample}.fasta'
+#     output:
+#         'util/haplomerger2/{sample}/{sample}.fa.gz'
+#     script:
+#         "scripts/softmask_assembly.py"
+#
+# rule remove_misjoins:
+#     input:
+#         "util/haplomerger2/{sample}/{sample}.fa.gz"
+#     output:
+#         "util/haplomerger2/{sample}/{sample}_A.fa.gz"
+#     threads: 10
+#     script:
+#         "scripts/remove_misjoins.py"
+#
+# rule haploidify_assembly:
+#     input:
+#         "util/haplomerger2/{sample}/{sample}_A.fa.gz"
+#     output:
+#         "util/haplomerger2/{sample}/{sample}_A_ref.fa.gz",
+#         "util/haplomerger2/{sample}/{sample}_A_alt.fa.gz"
+#     threads: 10
+#     script:
+#         "scripts/haploidify.py"

@@ -1,3 +1,4 @@
 #!/usr/bin/env bash
-snakemake --cluster 'sbatch -A schaack --mem=100G --tasks-per-node {threads}' \
-    -j 384 --rerun-incomplete "$@"
+SCHEDULER="$HOME/fmacrae/megadaph.private/megadaph/pipe/sbatch_scheduler.py"
+snakemake --cluster "$SCHEDULER" --cluster-config "sbatch_config.yml" -j 499 \
+    --rerun-incomplete "$@"
