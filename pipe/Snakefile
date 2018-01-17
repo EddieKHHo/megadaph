@@ -81,6 +81,7 @@ rule trim_adapters:
         fwd_reads = 'output/trim_adapters/{sample}.R1.fastq.gz',
         rev_reads = 'output/trim_adapters/{sample}.R2.fastq.gz'
     log: "output/trim_adapters/log/{sample}.log"
+    threads: 10
     params:
         ref = config['adapters'],
         k = '23',
@@ -91,7 +92,7 @@ rule trim_adapters:
         "bbduk.sh in={input.fwd_reads} in2={input.rev_reads} threads=1 "
         "out={output.fwd_reads} out2={output.rev_reads} ref={params.ref} "
         "k={params.k} ktrim={params.ktrim} mink={params.mink} "
-        "hdist={params.hdist} tpe tbo 2> {log}"
+        "hdist={params.hdist} threads={threads} tpe tbo 2> {log}"
 
 
 rule merge_reads:
@@ -125,18 +126,19 @@ rule quality_trim:
     log:
         paired = "output/quality_trim/log/{sample}.paired.log",
         unpaired = "output/quality_trim/log/{sample}.unpaired.log"
+    threads: 10
     params:
         qtrim = 'rl',
         trimq = '20',
         minlen = '50'
     shell:
         "bbduk.sh in={input.fwd_reads} in2={input.rev_reads} "
-        "out={output.fwd_reads} out2={output.rev_reads} threads=1 "
+        "out={output.fwd_reads} out2={output.rev_reads} threads={threads} "
         "qtrim={params.qtrim} trimq={params.trimq} minlen={params.minlen} "
         "2> {log.paired} &&"
-        "bbduk.sh in={input.merged_reads} out={output.merged_reads} threads=1 "
+        "bbduk.sh in={input.merged_reads} out={output.merged_reads} "
         "qtrim={params.qtrim} trimq={params.trimq} minlen={params.minlen} "
-        "2> {log.unpaired}"
+        "threads={threads} 2> {log.unpaired}"
 
 
 rule clean_fastqc:
@@ -177,6 +179,8 @@ rule initial_assembly:
         assembly = 'output/initial_assembly/{sample}.fasta',
         output_dir='output/initial_assembly/{sample}_spades'
     threads: 8
+    resources:
+        mem_mb = 50000
     shell:
         "python2 util/spades/bin/spades.py -1 {input.fwd_reads} -2 "
         "{input.rev_reads} -s {input.merged_reads} --threads {threads} "
@@ -200,6 +204,17 @@ rule bowtie2_index_assembly:
     shell:
         "bowtie2-build {input} output/length_filter_assembly/{wildcards.sample}"
 
+rule blast_initial_assembly:
+    input:
+        'output/length_filter_assembly/{sample}.fasta'
+    output:
+        "output/blast_initial_assembly/{sample}.tsv"
+    threads: 10
+    shell:
+        "blastn -db {config[blast_database]} -task megablast -max_target_seqs "
+        "5 -max_hsps 1 -evalue 1e-25 -query {input} -out {output} -outfmt "
+        "\"6 qseqid staxids bitscore std\" -num_threads {threads}"
+
 rule align_to_initial_assembly:
     input:
         assembly = match_assembly,
@@ -210,7 +225,9 @@ rule align_to_initial_assembly:
     output:
         bam = 'output/align_to_initial_assembly/{sample}.bam',
         bai = 'output/align_to_initial_assembly/{sample}.bam.bai'
-    threads: 10
+    threads: 12
+    resources:
+        mem_mb = 20000
     log:
         "output/align_to_initial_assembly/log/{sample}.log"
     run:
@@ -218,20 +235,7 @@ rule align_to_initial_assembly:
         shell("align_and_sort.py -1 {input.fwd_reads} -2 {input.rev_reads} -U "
               "{input.merged_reads} -x " + index_prefix + " -p {threads} > "
               "{output.bam} 2> {log}")
-        shell("samtools index {output.bai}")
-
-rule blast_initial_assembly:
-    input:
-        'output/length_filter_assembly/{sample}.fasta'
-    output:
-        "output/blast_initial_assembly/{sample}.tsv"
-    params:
-        ntdb = "input/nt/nt"
-    threads: 10
-    shell:
-        "blastn -db {config[blast_database]} -task megablast -max_target_seqs "
-        "5 -max_hsps 1 -evalue 1e-25 -query {input} -out {output} -outfmt "
-        "\"6 qseqid staxids bitscore std\" -num_threads {threads}"
+        shell("samtools index {output}.bai")
 
 #rule redundans:
 #    input:

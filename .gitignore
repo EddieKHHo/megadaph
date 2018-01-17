@@ -10,6 +10,7 @@
 *.pyc
 *.egg-info
 *.bam
+slurm*.out
 .snakemake/
 scripts
 /data/
