@@ -9,6 +9,7 @@
 *.cache
 *.pyc
 *.egg-info
+*.bam
 .snakemake/
 scripts
 /data/

@@ -1,3 +1,6 @@
 [submodule "pipeline/shared_modules"]
 	path = pipeline/shared_modules
 	url = git@github.com:fennerm/bioinformatics_scripts.git
+[submodule "pipe/sbatch_scheduler"]
+	path = pipe/sbatch_scheduler
+	url = git@github.com:fennerm/snakemake_sbatch_scheduler.git
