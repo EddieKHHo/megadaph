@@ -11,8 +11,7 @@
 *.egg-info
 *.bam
 slurm*.out
-.snakemake/
-scripts
+.snakemake*
 /data/
 devpipe
 pipe/input
