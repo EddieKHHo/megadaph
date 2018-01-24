@@ -176,7 +176,7 @@ rule multiqc:
 rule build_diamond_database:
     output:
         "output/build_diamond_database/uniprot_ref_proteomes.fasta",
-        "output/build_diamond_database/uniprot_ref_proteomes.diamond",
+        "output/build_diamond_database/uniprot_ref_proteomes.dmnd",
         "output/build_diamond_database/uniprot_ref_proteomes.taxids"
     threads: 16
     script:
@@ -237,7 +237,7 @@ rule blast_initial_assembly:
 rule diamond_blast_initial_assembly:
     input:
         assembly = 'output/length_filter_assembly/{genotype}SC.fasta',
-        db = "output/build_diamond_database/uniprot_ref_proteomes.diamond",
+        db = "output/build_diamond_database/uniprot_ref_proteomes.dmnd",
     output:
         "output/diamond_blast_initial_assembly/{genotype}SC.out"
     params:
