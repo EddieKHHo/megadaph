@@ -12,7 +12,6 @@
 *.bam
 slurm*.out
 .snakemake/
-scripts
 /data/
 devpipe
 pipe/input
