@@ -3,4 +3,6 @@
 isolates: all
 readsdir: input/reads
 adapters: input/adapters/adapters_illumina.fa
-blast_database: ~/kayla_scratch/kayla_blast/db/nt/nt
+blast_database: input/blast_database/nt
+nodes_dmp: input/taxonomy/nodes.dmp
+names_dmp: input/taxonomy/names.dmp
