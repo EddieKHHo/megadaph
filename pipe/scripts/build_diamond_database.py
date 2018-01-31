@@ -3,7 +3,7 @@
 reference proteomes
 
 Usage:
-  download_diamond_database.py OUTPUT_PREFIX
+download_diamond_database.py OUTPUT_PREFIX
 """
 import os
 
@@ -14,16 +14,16 @@ from snakemake import shell
 def main(outdir, threads):
     with local.cwd(outdir):
         # Download database
-        # shell("curl ftp://ftp.uniprot.org/pub/databases/uniprot/"
-        #       "current_release/knowledgebase/reference_proteomes/"
-        #       "Reference_Proteomes_2017_12.tar.gz > "
-        #       "Reference_Proteomes_2017_12")
+        shell("curl ftp://ftp.uniprot.org/pub/databases/uniprot/"
+              "current_release/knowledgebase/reference_proteomes/"
+              "Reference_Proteomes_2017_12.tar.gz > "
+              "Reference_Proteomes_2017_12")
 
-        # shell("tar -xvf Reference_Proteomes_2017_12")
+        shell("tar -xvf Reference_Proteomes_2017_12")
 
         # # Unpack protein FASTAs for each kingdom
-        # shell("ls */*.fasta.gz | grep -v 'DNA' | grep -v 'additional' | "
-        #       "parallel -j" + threads + " gunzip {{}}")
+        shell("ls */*.fasta.gz | grep -v 'DNA' | grep -v 'additional' | "
+              "parallel -j" + threads + " gunzip {{}}")
 
         shell("cat */*.fasta > uniprot_ref_proteomes.fasta")
 

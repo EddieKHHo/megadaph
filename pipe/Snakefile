@@ -21,9 +21,9 @@ GENOTYPE = list(set([x[0:2] for x in SAMPLE]))
 # Helper functions
 # ==============================================================================
 
-def get_initial_assembly_bams_from_genotype(wildcards):
+def get_assembly1_bams_from_genotype(wildcards):
     sample_names = get_samples_for_genotype(wildcards)
-    bam_files = ["output/align_to_initial_assembly/" + x + ".bam"
+    bam_files = ["output/align_to_assembly1/" + x + ".bam"
                  for x in sample_names]
     return bam_files
 
@@ -40,14 +40,14 @@ def get_starting_control(wildcards):
 def match_assembly(wildcards):
     """Given the sample, return the starting control assembly"""
     starting_control = get_starting_control(wildcards)
-    return os.path.join("output", "length_filter_assembly",
+    return os.path.join("output", "length_filter_assembly1",
                         starting_control + ".fasta")
 
 
 def match_assembly_index(wildcards):
     """Given the sample, return the starting control assembly bowtie2 index"""
     starting_control = get_starting_control(wildcards)
-    return os.path.join("output", "length_filter_assembly",
+    return os.path.join("output", "length_filter_assembly1",
                         starting_control + ".1.bt2")
 
 def bowtie2_idx_root(idx):
@@ -60,8 +60,8 @@ def bowtie2_idx_root(idx):
 rule all:
     input:
         'output/multiqc/multiqc.html',
-        expand('output/align_to_initial_assembly/{sample}.bam', sample=SAMPLE),
-        expand("output/init_blobtools_database/{genotype}.blobDB.json",
+        expand('output/align_to_assembly1/{sample}.bam', sample=SAMPLE),
+        expand("output/init_blobtools_database1/{genotype}.blobDB.json",
                 genotype=GENOTYPE)
 
 rule raw_fastqc:
@@ -183,14 +183,14 @@ rule build_diamond_database:
         "scripts/build_diamond_database.py"
 
 
-rule initial_assembly:
+rule assembly1:
     input:
         fwd_reads = 'output/quality_trim/{genotype}SC.R1.fastq.gz',
         rev_reads = 'output/quality_trim/{genotype}SC.R2.fastq.gz',
 	    merged_reads = 'output/quality_trim/{genotype}SC.merged.fastq.gz'
     output:
-        assembly = 'output/initial_assembly/{genotype}SC.fasta',
-        output_dir='output/initial_assembly/{genotype}SC_spades'
+        assembly = 'output/assembly1/{genotype}SC.fasta',
+        output_dir='output/assembly1/{genotype}SC_spades'
     threads: 8
     resources:
         mem_mb = 50000
@@ -200,28 +200,30 @@ rule initial_assembly:
 	    "-o {output.output_dir} && "
         "mv {output.output_dir}/scaffolds.fasta {output.assembly}"
 
-rule length_filter_assembly:
+rule length_filter_assembly1:
     input:
-        'output/initial_assembly/{genotype}SC.fasta'
+        'output/assembly1/{genotype}SC.fasta'
     output:
-        'output/length_filter_assembly/{genotype}SC.fasta'
+        'output/length_filter_assembly1/{genotype}SC.fasta'
     shell:
         "bioawk -c fastx '{{ if(length($seq) > 200) {{ print \">\"$name; print "
         "$seq }}}}' {input} > {output}"
 
-rule bowtie2_index_assembly:
+rule bowtie2_index_assembly1:
     input:
-        'output/length_filter_assembly/{genotype}SC.fasta'
+        'output/length_filter_assembly1/{genotype}SC.fasta'
     output:
-        'output/length_filter_assembly/{genotype}SC.1.bt2'
+        'output/length_filter_assembly1/{genotype}SC.1.bt2'
+    params:
+        output_prefix = "output/length_filter_assembly1/{genotype}SC"
     shell:
-        "bowtie2-build {input} output/length_filter_assembly/{wildcards.sample}"
+        "bowtie2-build {input} {params.output_prefix}"
 
-rule blast_initial_assembly:
+rule blast_assembly1:
     input:
-        'output/length_filter_assembly/{genotype}SC.fasta'
+        'output/length_filter_assembly1/{genotype}SC.fasta'
     output:
-        "output/blast_initial_assembly/{genotype}SC.tsv"
+        "output/blast_assembly1/{genotype}SC.tsv"
     threads: 10
     params:
         max_target_seqs = "5",
@@ -234,44 +236,49 @@ rule blast_initial_assembly:
         "-num_threads {threads}"
 
 
-rule diamond_blast_initial_assembly:
+rule diamond_blast_assembly1:
     input:
-        assembly = 'output/length_filter_assembly/{genotype}SC.fasta',
+        assembly = 'output/length_filter_assembly1/{genotype}SC.fasta',
         db = "output/build_diamond_database/uniprot_ref_proteomes.dmnd",
     output:
-        "output/diamond_blast_initial_assembly/{genotype}SC.out"
+        "output/diamond_blast_assembly1/{genotype}SC.out"
     params:
         max_target_seqs = "1",
         evalue = "1e-25"
     threads: 16
+    resources:
+        mem_mb = 50000
     shell:
         "diamond blastx --query {input.assembly} --max-target-seqs "
         "{params.max_target_seqs} --threads {threads} --sensitive "
         "--db {input.db} --evalue {params.evalue} --outfmt 6 --out {output}"
 
-rule taxify_diamond_blasts:
+rule taxify_diamond_blasts1:
     input:
-        diamond_hits = "output/diamond_blast_initial_assembly/{genotype}SC.out",
+        diamond_hits = "output/diamond_blast_assembly1/{genotype}SC.out",
         taxids = "output/build_diamond_database/uniprot_ref_proteomes.taxids"
     output:
-        "output/diamond_blast_initial_assembly/{genotype}SC.tsv"
+        "output/diamond_blast_assembly1/{genotype}SC.taxified.out",
+    params:
+        output_prefix = "output/diamond_blast_assembly1/"
     shell:
-        "blobtools taxify -f {input.diamond_hits} -m {input.taxids} -s 0 -t 2"
+        "blobtools taxify -f {input.diamond_hits} -m {input.taxids} -s 0 -t 2 "
+        "-o {params.output_prefix}"
 
-rule align_to_initial_assembly:
+rule align_to_assembly1:
     input: assembly = match_assembly,
         index = match_assembly_index,
         fwd_reads = 'output/quality_trim/{sample}.R1.fastq.gz',
         rev_reads = 'output/quality_trim/{sample}.R2.fastq.gz',
         merged_reads = 'output/quality_trim/{sample}.merged.fastq.gz'
     output:
-        bam = 'output/align_to_initial_assembly/{sample}.bam',
-        bai = 'output/align_to_initial_assembly/{sample}.bam.bai'
+        bam = 'output/align_to_assembly1/{sample}.bam',
+        bai = 'output/align_to_assembly1/{sample}.bam.bai'
     threads: 12
     resources:
         mem_mb = 20000
     log:
-        "output/align_to_initial_assembly/log/{sample}.log"
+        "output/align_to_assembly1/log/{sample}.log"
     run:
         index_prefix = bowtie2_idx_root(input.index)
         shell("align_and_sort.py -1 {input.fwd_reads} -2 {input.rev_reads} -U "
@@ -279,20 +286,22 @@ rule align_to_initial_assembly:
               "{output.bam} 2> {log}")
         shell("samtools index {output.bam}")
 
-rule init_blobtools_database:
+rule init_blobtools_database1:
     input:
-        assembly = "output/length_filter_assembly/{genotype}SC.fasta",
-        blast_hits = "output/blast_initial_assembly/{genotype}SC.tsv",
-        diamond_hits = "output/diamond_blast_initial_assembly/{genotype}SC.tsv",
-        bams = get_initial_assembly_bams_from_genotype
+        assembly = "output/length_filter_assembly1/{genotype}SC.fasta",
+        blast_hits = "output/blast_assembly1/{genotype}SC.tsv",
+        diamond_hits = "output/diamond_blast_assembly1/{genotype}SC.taxified.out",
+        bams = get_assembly1_bams_from_genotype
     output:
-        "output/init_blobtools_database/{genotype}.blobDB.json"
+        "output/init_blobtools_database1/{genotype}.blobDB.json"
         # Also produces .cov files
+    resources:
+        mem_mb = 20000
     log:
-        "output/init_blobtools_database/log/{genotype}.log"
+        "output/init_blobtools_database1/log/{genotype}.log"
     run:
-        bam_args = ' '.join(input.bams)
-        output_prefix = os.path.join("output/init_blobtools_database",
+        bam_args = ' -b '.join(input.bams)
+        output_prefix = os.path.join("output/init_blobtools_database1",
                                      wildcards.genotype)
         shell("blobtools create -i {input.assembly} --type spades --title "
               "{wildcards.genotype} --out " + output_prefix + " --hitsfile "
@@ -300,10 +309,11 @@ rule init_blobtools_database:
               "{config[nodes_dmp]} --names {config[names_dmp]} -b "
               + bam_args + " > {log} 2>&1")
 
+# SWITCH TO ASSEMBLY1,2,3 NAMING SCHEME
 
 #rule redundans:
 #    input:
-#        assembly = 'output/initial_assembly/{sample}.fasta',
+#        assembly = 'output/assembly1/{sample}.fasta',
 #        fwd_reads = 'output/quality_trim/{sample}.r1.fastq.gz',
 #        rev_reads = 'output/quality_trim/{sample}.r2.fastq.gz',
 #        merged_reads = 'output/quality_trim/{sample}.merged.fastq.gz'
@@ -318,7 +328,7 @@ rule init_blobtools_database:
 
 # rule create_haplomerger_project:
 #     input:
-#         'output/initial_assembly/{sample}.fasta'
+#         'output/assembly1/{sample}.fasta'
 #     output:
 #         'util/haplomerger2/{sample}'
 #     run:
@@ -330,7 +340,7 @@ rule init_blobtools_database:
 # rule softmask_assembly:
 #     input:
 #         projdir = 'util/haplomerger2/{sample}',
-#         assembly = 'output/initial_assembly/{sample}.fasta'
+#         assembly = 'output/assembly1/{sample}.fasta'
 #     output:
 #         'util/haplomerger2/{sample}/{sample}.fa.gz'
 #     script:

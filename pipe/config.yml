@@ -3,6 +3,6 @@
 isolates: all
 readsdir: input/reads
 adapters: input/adapters/adapters_illumina.fa
-blast_database: input/blast_database/nt
+blast_database: input/blastdb/nt
 nodes_dmp: input/taxonomy/nodes.dmp
 names_dmp: input/taxonomy/names.dmp
