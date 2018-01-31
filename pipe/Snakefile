@@ -305,7 +305,7 @@ rule init_blobtools_database1:
                                      wildcards.genotype)
         shell("blobtools create -i {input.assembly} --type spades --title "
               "{wildcards.genotype} --out " + output_prefix + " --hitsfile "
-              "{input.blast_hits} {input.diamond_hits} --nodes "
+              "{input.blast_hits} --hitsfile {input.diamond_hits} --nodes "
               "{config[nodes_dmp]} --names {config[names_dmp]} -b "
               + bam_args + " > {log} 2>&1")
 
