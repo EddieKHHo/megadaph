@@ -1,13 +1,14 @@
+#!/usr/bin/env python
 """Produce a series of blobplots across varius taxonomic ranks
 
 Requires 5 threads
 
 Usage:
-  produce_blobplots.py -o DIR -d BLOBTOOLS_DATABASE
+produce_blobplots.py -o DIR -d BLOBTOOLS_DATABASE
 
 Options:
-  -o, --outdir=DIR              Output directory
-  -d, --db=BLOBTOOLS_DATABASE   Blobtools database json
+-o, --outdir=DIR              Output directory
+-d, --db=BLOBTOOLS_DATABASE   Blobtools database json
 """
 from docopt import docopt
 from plumbum import local
@@ -20,10 +21,10 @@ RANKS = ["family", "genus", "family", "order", "phylum", "species"]
 def main(db, outdir):
     ps = []
     for rank in RANKS:
-        rank_outdir = local.path(outdir) / rank
+        rank_outdir = str(local.path(outdir) / rank) + "/"
         ps.append(
-            blobtools.popen('blobplot', '-p', '20', '-r', rank, '-i', db, '-o',
-                            rank_outdir))
+            blobtools.popen(['blobplot', '-p', '20', '-r', rank, '-i', db,
+                             '-o', rank_outdir]))
     for p in ps:
         p.communicate()
 
