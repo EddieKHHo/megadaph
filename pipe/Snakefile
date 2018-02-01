@@ -17,6 +17,10 @@ SAMPLE = sorted(list(set(SAMPLE)))
 # Genotype indices given by first two letters of sample name
 GENOTYPE = list(set([x[0:2] for x in SAMPLE]))
 
+GENOTYPE_SAMPLE = {}
+for genotype in GENOTYPE:
+    GENOTYPE_SAMPLE[genotype] = [x for x in SAMPLE if x.startswith(genotype)]
+
 # ==============================================================================
 # Helper functions
 # ==============================================================================
@@ -293,8 +297,11 @@ rule init_blobtools_database1:
         diamond_hits = "output/diamond_blast_assembly1/{genotype}SC.taxified.out",
         bams = get_assembly1_bams_from_genotype
     output:
-        "output/init_blobtools_database1/{genotype}.blobDB.json"
-        # Also produces .cov files
+        "output/init_blobtools_database1/{genotype}.blobDB.json",
+        lambda wildcards: [os.path.join(
+            "output", "init_blobtools_database1", 
+            wildcards.genotype +  x + ".bam.cov")
+            for x in GENOTYPE_SAMPLE[wildcards.genotype]]
     resources:
         mem_mb = 20000
     log:
@@ -309,7 +316,18 @@ rule init_blobtools_database1:
               "{config[nodes_dmp]} --names {config[names_dmp]} -b "
               + bam_args + " > {log} 2>&1")
 
-# SWITCH TO ASSEMBLY1,2,3 NAMING SCHEME
+
+rule produce_blobplots1:
+    input:
+        "output/init_blobtools_database1/{genotype}.blobDB.json"
+    output:
+        expand("output/{genotype}/{rank}", 
+            rank=["family", "genus", "family", "order", "phylum", "species"])
+    params:
+        output_prefix = "output/{genotype}"
+    shell:
+        "scripts/produce_blobplots.py -o {params.output_prefix} -d {input}"
+
 
 #rule redundans:
 #    input:
