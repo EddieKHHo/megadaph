@@ -298,11 +298,7 @@ rule init_blobtools_database1:
         diamond_hits = "output/diamond_blast_assembly1/{genotype}SC.taxified.out",
         bams = get_assembly1_bams_from_genotype
     output:
-        "output/init_blobtools_database1/{genotype}.blobDB.json",
-        lambda wildcards: [os.path.join(
-            "output", "init_blobtools_database1", 
-            wildcards.genotype +  x + ".bam.cov")
-            for x in GENOTYPE_SAMPLE[wildcards.genotype]]
+        "output/init_blobtools_database1/{genotype}.blobDB.json"
     resources:
         mem_mb = 20000
     log:
@@ -322,8 +318,7 @@ rule produce_blobplots1:
     input:
         "output/init_blobtools_database1/{genotype}.blobDB.json"
     output:
-        expand("output/{genotype}/{rank}", 
-            rank=["family", "genus", "family", "order", "phylum", "species"])
+        "output/{genotype}/{rank}"
     params:
         output_prefix = "output/{genotype}"
     shell:
