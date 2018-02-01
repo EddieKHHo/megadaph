@@ -65,8 +65,9 @@ rule all:
     input:
         'output/multiqc/multiqc.html',
         expand('output/align_to_assembly1/{sample}.bam', sample=SAMPLE),
-        expand("output/init_blobtools_database1/{genotype}.blobDB.json",
-                genotype=GENOTYPE)
+        expand("output/{genotype}/{rank}", 
+            rank=["family", "genus", "family", "order", "phylum", "species"],
+            genotype=GENOTYPE)
 
 rule raw_fastqc:
     input:
