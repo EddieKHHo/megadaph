@@ -65,9 +65,8 @@ rule all:
     input:
         'output/multiqc/multiqc.html',
         expand('output/align_to_assembly1/{sample}.bam', sample=SAMPLE),
-        expand("output/{genotype}/{rank}", 
-            rank=["family", "genus", "family", "order", "phylum", "species"],
-            genotype=GENOTYPE)
+        expand("output/produce_blobplots1/{genotype}/family/{genotype}.bestsum"
+               ".family.p20.blobplot.bam0.png", genotype=GENOTYPE)
 
 rule raw_fastqc:
     input:
@@ -312,15 +311,23 @@ rule init_blobtools_database1:
               "{input.blast_hits} --hitsfile {input.diamond_hits} --nodes "
               "{config[nodes_dmp]} --names {config[names_dmp]} -b "
               + bam_args + " > {log} 2>&1")
+        # Move cov files to separate dir
 
 
 rule produce_blobplots1:
     input:
         "output/init_blobtools_database1/{genotype}.blobDB.json"
     output:
-        "output/{genotype}/{rank}"
+        "output/produce_blobplots1/{genotype}/family/{genotype}.bestsum.family.p20.blobplot.bam0.png",
+        "output/produce_blobplots1/{genotype}/genus/{genotype}.bestsum.genus.p20.blobplot.bam0.png",
+        "output/produce_blobplots1/{genotype}/order/{genotype}.bestsum.order.p20.blobplot.bam0.png",
+        "output/produce_blobplots1/{genotype}/phylum/{genotype}.bestsum.phylum.p20.blobplot.bam0.png",
+        "output/produce_blobplots1/{genotype}/species/{genotype}.bestsum.species.p20.blobplot.bam0.png"
+    threads: 5
+    resources:
+        mem_mb = 20000
     params:
-        output_prefix = "output/{genotype}"
+        output_prefix = "output/produce_blobplots1/{genotype}"
     shell:
         "scripts/produce_blobplots.py -o {params.output_prefix} -d {input}"
 
