@@ -35,6 +35,8 @@ def get_assembly1_bams_from_genotype(wildcards):
 def get_samples_for_genotype(wildcards):
     return [x for x in SAMPLE if x.startswith(wildcards.genotype)]
 
+def get_genotype_for_sample(wildcards):
+    return ''.join(sample[0:2])
 
 def get_starting_control(wildcards):
     """Given a sample ID, return the ID of its starting control"""
@@ -67,7 +69,9 @@ rule all:
         expand('output/align_to_assembly1/{sample}.bam', sample=SAMPLE),
         expand("output/{genotype}/{rank}", 
             rank=["family", "genus", "family", "order", "phylum", "species"],
-            genotype=GENOTYPE)
+            genotype=GENOTYPE),
+        expand("output/produce_covplots1/{sample}.bestsum.phylum.p20.span.100.covplot.covsum.png",
+        sample=SAMPLE)
 
 rule raw_fastqc:
     input:
@@ -299,19 +303,15 @@ rule init_blobtools_database1:
         bams = get_assembly1_bams_from_genotype
     output:
         "output/init_blobtools_database1/{genotype}.blobDB.json"
+        # Also produces cov files in outputs/produce_coverage_files1
     resources:
         mem_mb = 20000
     log:
         "output/init_blobtools_database1/log/{genotype}.log"
-    run:
-        bam_args = ' -b '.join(input.bams)
-        output_prefix = os.path.join("output/init_blobtools_database1",
-                                     wildcards.genotype)
-        shell("blobtools create -i {input.assembly} --type spades --title "
-              "{wildcards.genotype} --out " + output_prefix + " --hitsfile "
-              "{input.blast_hits} --hitsfile {input.diamond_hits} --nodes "
-              "{config[nodes_dmp]} --names {config[names_dmp]} -b "
-              + bam_args + " > {log} 2>&1")
+    params:
+        covdir = "output/produce_coverage_files1"
+    script:
+        "scripts/init_blobtools_database.py"
 
 
 rule produce_blobplots1:
@@ -323,7 +323,6 @@ rule produce_blobplots1:
         output_prefix = "output/{genotype}"
     shell:
         "scripts/produce_blobplots.py -o {params.output_prefix} -d {input}"
-
 
 #rule redundans:
 #    input:
@@ -378,3 +377,13 @@ rule produce_blobplots1:
 #     threads: 10
 #     script:
 #         "scripts/haploidify.py"
+
+rule produce_covplots1:
+    input:
+        covplot = "output/produce_coverage_files1/{sample}"
+        db = lambda wildcards: "output/init_blobtools_database1/" + 
+            get_genotype_for_sample(wildcards) + ".blobDB.json"
+    output:
+        "output/produce_covplots1/{sample}.bestsum.phylum.p20.span.100.covplot.covsum.png"
+    script:
+        "scripts/produce_covplots.py"
