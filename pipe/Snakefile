@@ -36,7 +36,7 @@ def get_samples_for_genotype(wildcards):
     return [x for x in SAMPLE if x.startswith(wildcards.genotype)]
 
 def get_genotype_for_sample(wildcards):
-    return ''.join(sample[0:2])
+    return ''.join(wildcards.sample[0:2])
 
 def get_starting_control(wildcards):
     """Given a sample ID, return the ID of its starting control"""
@@ -68,7 +68,11 @@ rule all:
         'output/multiqc/multiqc.html',
         expand('output/align_to_assembly1/{sample}.bam', sample=SAMPLE),
         expand("output/produce_blobplots1/{genotype}/family/{genotype}.bestsum"
-               ".family.p20.blobplot.bam0.png", genotype=GENOTYPE)
+               ".family.p20.span.100.blobplot.bam0.png", genotype=GENOTYPE),
+        expand("output/produce_covplots1/{sample}.bestsum.phylum.p20.span.100.covplot.covsum.png",
+               sample=SAMPLE),
+        expand("output/produce_blobtable1/{genotype}.blobDB.bestsum.table.txt",
+               genotype=GENOTYPE)
 
 rule raw_fastqc:
     input:
@@ -310,18 +314,26 @@ rule init_blobtools_database1:
     script:
         "scripts/init_blobtools_database.py"
 
+rule dummy_produce_coverage_files1:
+    input:
+        expand("output/init_blobtools_database1/{genotype}.blobDB.json",
+               genotype=GENOTYPE)
+    output:
+        expand("output/produce_coverage_files1/{sample}.cov", sample=SAMPLE)
+
+
 rule produce_blobplots1:
     input:
         "output/init_blobtools_database1/{genotype}.blobDB.json"
     output:
-        "output/produce_blobplots1/{genotype}/family/{genotype}.bestsum.family.p20.blobplot.bam0.png",
-        "output/produce_blobplots1/{genotype}/genus/{genotype}.bestsum.genus.p20.blobplot.bam0.png",
-        "output/produce_blobplots1/{genotype}/order/{genotype}.bestsum.order.p20.blobplot.bam0.png",
-        "output/produce_blobplots1/{genotype}/phylum/{genotype}.bestsum.phylum.p20.blobplot.bam0.png",
-        "output/produce_blobplots1/{genotype}/species/{genotype}.bestsum.species.p20.blobplot.bam0.png"
+        "output/produce_blobplots1/{genotype}/family/{genotype}.bestsum.family.p20.span.100.blobplot.bam0.png",
+        "output/produce_blobplots1/{genotype}/genus/{genotype}.bestsum.genus.p20.span.100.blobplot.bam0.png",
+        "output/produce_blobplots1/{genotype}/order/{genotype}.bestsum.order.p20.span.100.blobplot.bam0.png",
+        "output/produce_blobplots1/{genotype}/phylum/{genotype}.bestsum.phylum.p20.span.100.blobplot.bam0.png",
+        "output/produce_blobplots1/{genotype}/species/{genotype}.bestsum.species.p20.span.100.blobplot.bam0.png"
     threads: 5
     resources:
-        mem_mb = 20000
+        mem_mb = 40000
     params:
         output_prefix = "output/produce_blobplots1/{genotype}"
     shell:
@@ -383,10 +395,20 @@ rule produce_blobplots1:
 
 rule produce_covplots1:
     input:
-        covplot = "output/produce_coverage_files1/{sample}"
-        db = lambda wildcards: "output/init_blobtools_database1/" + 
-            get_genotype_for_sample(wildcards) + ".blobDB.json"
+        covplot = "output/produce_coverage_files1/{sample}.cov",
+        db = lambda wildcards: ("output/init_blobtools_database1/" + 
+            get_genotype_for_sample(wildcards) + ".blobDB.json")
     output:
         "output/produce_covplots1/{sample}.bestsum.phylum.p20.span.100.covplot.covsum.png"
+    params:
+        output_prefix = "output/produce_covplots1/{sample}"
     script:
         "scripts/produce_covplots.py"
+
+rule produce_blobtable1:
+    input:
+        db = "output/init_blobtools_database1/{genotype}.blobDB.json"
+    output:
+        "output/produce_blobtable1/{genotype}.blobDB.bestsum.table.txt"
+    shell:
+        "blobtools view -r all -i {input.db} -o output/produce_blobtable1/"
