@@ -72,7 +72,9 @@ rule all:
         expand("output/produce_covplots1/{sample}.bestsum.phylum.p20.span.100.covplot.covsum.png",
                sample=SAMPLE),
         expand("output/produce_blobtable1/{genotype}.blobDB.bestsum.table.txt",
-               genotype=GENOTYPE)
+               genotype=GENOTYPE),
+        expand("output/produce_covplots_excluding_bacteria/{sample}.bestsum.phylum.p20.span.100.covplot.covsum.png",
+        sample=SAMPLE)
 
 rule raw_fastqc:
     input:
@@ -401,7 +403,23 @@ rule produce_covplots1:
     output:
         "output/produce_covplots1/{sample}.bestsum.phylum.p20.span.100.covplot.covsum.png"
     params:
-        output_prefix = "output/produce_covplots1/{sample}"
+        output_prefix = "output/produce_covplots1/{sample}",
+        rank = "superkingdom",
+        exclude = ''
+    script:
+        "scripts/produce_covplots.py"
+
+rule produce_covplots_excluding_bacteria:
+    input:
+        covplot = "output/produce_coverage_files1/{sample}.cov",
+        db = lambda wildcards: ("output/init_blobtools_database1/" + 
+            get_genotype_for_sample(wildcards) + ".blobDB.json")
+    output:
+        "output/produce_covplots_excluding_bacteria/{sample}.bestsum.phylum.p20.span.100.covplot.covsum.png"
+    params:
+        output_prefix = "output/produce_covplots1/{sample}",
+        rank = "superkingdom",
+        exclude = "Bacteria"
     script:
         "scripts/produce_covplots.py"
 

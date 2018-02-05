@@ -8,11 +8,12 @@ bam_args = ' -b '.join(snakemake.input.bams)
 output_prefix = (local.path("output/init_blobtools_database1") /
                  snakemake.wildcards.genotype)
 
-shell("blobtools create -i {input.assembly} --type spades --title "
-      "{wildcards.genotype} --out " + output_prefix + " --hitsfile "
-      "{input.blast_hits} --hitsfile {input.diamond_hits} --nodes "
-      "{config[nodes_dmp]} --names {config[names_dmp]} -b "
-      + bam_args + " > {log} 2>&1")
+shell("blobtools create -i {snakemake.input.assembly} --title "
+      "{snakemake.wildcards.genotype} --out " + output_prefix + " --hitsfile "
+      "{snakemake.input.blast_hits} --hitsfile {snakemake.input.diamond_hits} "
+      "--nodes {snakemake.config[nodes_dmp]} --names "
+      "{snakemake.config[names_dmp]} -b " + bam_args + " > {snakemake.log} "
+      "2>&1")
 
 # The coverage files are produced in the same directory as the database by
 # default. Move them to their own directory

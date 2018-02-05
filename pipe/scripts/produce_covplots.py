@@ -2,8 +2,13 @@
 from plumbum import local
 from snakemake import shell
 
-shell("blobtools covplot -p 20 -c {snakemake.input.covplot} -i "
-      "{snakemake.input.db} -o {snakemake.params.output_prefix}")
+
+command = ("blobtools covplot -p 20 -c {snakemake.input.covplot} -i "
+           "{snakemake.input.db} -r {snakemake.params.rank} "
+           "-o {snakemake.params.output_prefix}")
+if snakemake.params.exclude:
+    command += " --exclude {snakemake.params.exclude}"
+
 outdir = local.path("output/produce_covplots1")
 output_files = outdir.glob(snakemake.wildcards.sample + "*")
 for f in output_files:
