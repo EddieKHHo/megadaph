@@ -46,6 +46,7 @@ def get_samples_for_genotype(wildcards):
 def get_genotype_for_sample(wildcards):
     return ''.join(wildcards.sample[0:2])
 
+
 def get_starting_control(wildcards):
     """Given a sample ID, return the ID of its starting control"""
     return wildcards.sample[0:2] + "SC"
@@ -61,14 +62,14 @@ def match_assembly(wildcards):
 
 def match_assembly_index(wildcards):
     """Given the sample, return the starting control assembly bowtie2 index"""
-starting_control = get_starting_control(wildcards)
-return os.path.join("output", "length_filter_assembly1",
-                    starting_control + ".1.bt2")
+    starting_control = get_starting_control(wildcards)
+    return os.path.join("output", "length_filter_assembly1",
+                        starting_control + ".1.bt2")
 
 
 def bowtie2_idx_root(idx):
     """Given the path to a forward bowtie2 index, return its root name"""
-return os.path.splitext(os.path.splitext(idx)[0])[0]
+    return os.path.splitext(os.path.splitext(idx)[0])[0]
 
 # ==============================================================================
 # Pipeline
@@ -86,9 +87,10 @@ rule all:
         expand("output/produce_covplots_excluding_bacteria/{sample}.covsum.png",
                sample=SAMPLE)
 
-        rule raw_fastqc:
-            input:
-                fwd_reads = 'input/reads/{sample}.R1.fastq.gz',
+
+rule raw_fastqc:
+    input:
+        fwd_reads = 'input/reads/{sample}.R1.fastq.gz',
         rev_reads = 'input/reads/{sample}.R2.fastq.gz'
     output:
         'output/raw_fastqc/{sample}.R1_fastqc.html',
@@ -454,4 +456,4 @@ rule produce_blobtable1:
     output:
         "output/produce_blobtable1/{genotype}.blobDB.bestsum.table.txt"
     shell:
-        "blobtools view -r all -i {input.db} -o output/produce_blobtable1/"
+        "blobtools view -r all -b -i {input.db} -o output/produce_blobtable1/"
