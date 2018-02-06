@@ -9,7 +9,7 @@ from shutil import rmtree
 configfile: "config.yml"
 
 SAMPLE, PAIR = glob_wildcards(
-        os.path.join(config['readsdir'], '{sample}.{pair}.fastq.gz'))
+                              os.path.join(config['readsdir'], '{sample}.{pair}.fastq.gz'))
 
 # Remove duplicate entries
 SAMPLE = sorted(list(set(SAMPLE)))
@@ -46,19 +46,21 @@ def get_starting_control(wildcards):
 def match_assembly(wildcards):
     """Given the sample, return the starting control assembly"""
     starting_control = get_starting_control(wildcards)
-    return os.path.join("output", "length_filter_assembly1",
-                        starting_control + ".fasta")
+    assembly = os.path.join("output", "length_filter_assembly1",
+                            starting_control + ".fasta")
+    return assembly
 
 
 def match_assembly_index(wildcards):
     """Given the sample, return the starting control assembly bowtie2 index"""
-    starting_control = get_starting_control(wildcards)
-    return os.path.join("output", "length_filter_assembly1",
-                        starting_control + ".1.bt2")
+starting_control = get_starting_control(wildcards)
+return os.path.join("output", "length_filter_assembly1",
+                    starting_control + ".1.bt2")
+
 
 def bowtie2_idx_root(idx):
-  """Given the path to a forward bowtie2 index, return its root name"""
-  return os.path.splitext(os.path.splitext(idx)[0])[0]
+    """Given the path to a forward bowtie2 index, return its root name"""
+return os.path.splitext(os.path.splitext(idx)[0])[0]
 
 # ==============================================================================
 # Pipeline
@@ -74,11 +76,11 @@ rule all:
         expand("output/produce_blobtable1/{genotype}.blobDB.bestsum.table.txt",
                genotype=GENOTYPE),
         expand("output/produce_covplots_excluding_bacteria/{sample}.bestsum.phylum.p20.span.100.covplot.covsum.png",
-        sample=SAMPLE)
+               sample=SAMPLE)
 
-rule raw_fastqc:
-    input:
-        fwd_reads = 'input/reads/{sample}.R1.fastq.gz',
+        rule raw_fastqc:
+            input:
+                fwd_reads = 'input/reads/{sample}.R1.fastq.gz',
         rev_reads = 'input/reads/{sample}.R2.fastq.gz'
     output:
         'output/raw_fastqc/{sample}.R1_fastqc.html',
@@ -178,7 +180,7 @@ rule multiqc:
         expand('output/clean_fastqc/{sample}.R1_fastqc.html', sample=SAMPLE),
         expand('output/clean_fastqc/{sample}.R2_fastqc.html', sample=SAMPLE),
         expand(
-            'output/clean_fastqc/{sample}.merged_fastqc.html', sample=SAMPLE),
+               'output/clean_fastqc/{sample}.merged_fastqc.html', sample=SAMPLE),
         expand('output/raw_fastqc/{sample}.R1_fastqc.html', sample=SAMPLE),
         expand('output/raw_fastqc/{sample}.R2_fastqc.html', sample=SAMPLE)
     output: 'output/multiqc/multiqc.html'
@@ -199,7 +201,7 @@ rule assembly1:
     input:
         fwd_reads = 'output/quality_trim/{genotype}SC.R1.fastq.gz',
         rev_reads = 'output/quality_trim/{genotype}SC.R2.fastq.gz',
-	    merged_reads = 'output/quality_trim/{genotype}SC.merged.fastq.gz'
+        merged_reads = 'output/quality_trim/{genotype}SC.merged.fastq.gz'
     output:
         assembly = 'output/assembly1/{genotype}SC.fasta',
         output_dir='output/assembly1/{genotype}SC_spades'
@@ -209,7 +211,7 @@ rule assembly1:
     shell:
         "python2 util/spades/bin/spades.py -1 {input.fwd_reads} -2 "
         "{input.rev_reads} -s {input.merged_reads} --threads {threads} "
-	    "-o {output.output_dir} && "
+        "-o {output.output_dir} && "
         "mv {output.output_dir}/scaffolds.fasta {output.assembly}"
 
 rule length_filter_assembly1:
@@ -278,7 +280,8 @@ rule taxify_diamond_blasts1:
         "-o {params.output_prefix}"
 
 rule align_to_assembly1:
-    input: assembly = match_assembly,
+    input:
+        assembly = match_assembly,
         index = match_assembly_index,
         fwd_reads = 'output/quality_trim/{sample}.R1.fastq.gz',
         rev_reads = 'output/quality_trim/{sample}.R2.fastq.gz',
@@ -320,8 +323,8 @@ rule dummy_produce_coverage_files1:
     input:
         expand("output/init_blobtools_database1/{genotype}.blobDB.json",
                genotype=GENOTYPE)
-    output:
-        expand("output/produce_coverage_files1/{sample}.cov", sample=SAMPLE)
+        output:
+            expand("output/produce_coverage_files1/{sample}.cov", sample=SAMPLE)
 
 
 rule produce_blobplots1:
@@ -398,10 +401,10 @@ rule produce_blobplots1:
 rule produce_covplots1:
     input:
         covplot = "output/produce_coverage_files1/{sample}.cov",
-        db = lambda wildcards: ("output/init_blobtools_database1/" + 
-            get_genotype_for_sample(wildcards) + ".blobDB.json")
-    output:
-        "output/produce_covplots1/{sample}.bestsum.phylum.p20.span.100.covplot.covsum.png"
+        db = lambda wildcards: ("output/init_blobtools_database1/" +
+                                get_genotype_for_sample(wildcards) + ".blobDB.json")
+        output:
+            "output/produce_covplots1/{sample}.bestsum.phylum.p20.span.100.covplot.covsum.png"
     params:
         output_prefix = "output/produce_covplots1/{sample}",
         rank = "superkingdom",
@@ -412,10 +415,10 @@ rule produce_covplots1:
 rule produce_covplots_excluding_bacteria:
     input:
         covplot = "output/produce_coverage_files1/{sample}.cov",
-        db = lambda wildcards: ("output/init_blobtools_database1/" + 
-            get_genotype_for_sample(wildcards) + ".blobDB.json")
-    output:
-        "output/produce_covplots_excluding_bacteria/{sample}.bestsum.phylum.p20.span.100.covplot.covsum.png"
+        db = lambda wildcards: ("output/init_blobtools_database1/" +
+                                get_genotype_for_sample(wildcards) + ".blobDB.json")
+        output:
+            "output/produce_covplots_excluding_bacteria/{sample}.bestsum.phylum.p20.span.100.covplot.covsum.png"
     params:
         output_prefix = "output/produce_covplots1/{sample}",
         rank = "superkingdom",
