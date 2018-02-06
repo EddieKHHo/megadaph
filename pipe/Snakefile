@@ -77,15 +77,13 @@ def bowtie2_idx_root(idx):
 rule all:
     input:
         'output/multiqc/multiqc.html',
-        expand('output/align_to_assembly1/{sample}.bam', sample=SAMPLE),
         expand("output/produce_blobplots1/{genotype}/family/{genotype}.bestsum"
                ".family.p20.span.100.blobplot.cov0.png", genotype=GENOTYPE),
         expand("output/produce_covplots1/{sample}.covsum.png",
                sample=SAMPLE),
-        expand("output/produce_blobtable1/{genotype}.blobDB.bestsum.table.txt",
-               genotype=GENOTYPE),
         expand("output/produce_covplots_excluding_bacteria/{sample}.covsum.png",
-               sample=SAMPLE)
+               sample=SAMPLE),
+        expand("output/filter_blobtable1/{genotype}.tsv", genotype=GENOTYPE)
 
 
 rule raw_fastqc:
@@ -457,3 +455,11 @@ rule produce_blobtable1:
         "output/produce_blobtable1/{genotype}.blobDB.bestsum.table.txt"
     shell:
         "blobtools view -r all -b -i {input.db} -o output/produce_blobtable1/"
+
+rule filter_blobtable1:
+    input:
+        "output/produce_blobtable1/{genotype}.blobDB.bestsum.table.txt"
+    output:
+        "output/filter_blobtable1/{genotype}.tsv"
+    shell:
+        "scripts/filter_blobtable1.R -o {output} {input}"
