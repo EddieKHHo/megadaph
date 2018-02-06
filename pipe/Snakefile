@@ -32,8 +32,16 @@ def get_assembly1_bams_from_genotype(wildcards):
     return bam_files
 
 
+def get_assembly1_covfiles_from_genotype(wildcards):
+    sample_names = get_samples_for_genotype(wildcards)
+    bam_files = ["output/convert_alignment_to_cov1/" + x + ".bam.cov"
+                 for x in sample_names]
+    return bam_files
+
+
 def get_samples_for_genotype(wildcards):
     return [x for x in SAMPLE if x.startswith(wildcards.genotype)]
+
 
 def get_genotype_for_sample(wildcards):
     return ''.join(wildcards.sample[0:2])
@@ -68,13 +76,13 @@ rule all:
         'output/multiqc/multiqc.html',
         expand('output/align_to_assembly1/{sample}.bam', sample=SAMPLE),
         expand("output/produce_blobplots1/{genotype}/family/{genotype}.bestsum"
-               ".family.p20.span.100.blobplot.bam0.png", genotype=GENOTYPE),
-        expand("output/produce_covplots1/{sample}.bestsum.phylum.p20.span.100.covplot.covsum.png",
+               ".family.p20.span.100.blobplot.cov0.png", genotype=GENOTYPE),
+        expand("output/produce_covplots1/{sample}.covsum.png",
                sample=SAMPLE),
         expand("output/produce_blobtable1/{genotype}.blobDB.bestsum.table.txt",
                genotype=GENOTYPE),
-        expand("output/produce_covplots_excluding_bacteria/{sample}.bestsum.phylum.p20.span.100.covplot.covsum.png",
-        sample=SAMPLE)
+        expand("output/produce_covplots_excluding_bacteria/{sample}.covsum.png",
+               sample=SAMPLE)
 
 rule raw_fastqc:
     input:
@@ -298,41 +306,55 @@ rule align_to_assembly1:
               "{output.bam} 2> {log}")
         shell("samtools index {output.bam}")
 
+rule convert_alignment_to_cov1:
+    input:
+        bam = "output/align_to_assembly1/{sample}.bam",
+        assembly = lambda wildcards: ''.join([
+            "output/length_filter_assembly1/", 
+            get_genotype_for_sample(wildcards), "SC.fasta"])
+    output:
+        "output/convert_alignment_to_cov1/{sample}.bam.cov"
+    resources:
+        mem_mb = 20000
+    params:
+        output_prefix = "output/convert_alignment_to_cov1/"
+    log:
+        "output/convert_alignment_to_cov1/logs/{sample}.log"
+    shell:
+        "blobtools map2cov -i {input.assembly} -b {input.bam} "
+        "-o {params.output_prefix} 2> {log}"
+
 rule init_blobtools_database1:
     input:
         assembly = "output/length_filter_assembly1/{genotype}SC.fasta",
         blast_hits = "output/blast_assembly1/{genotype}SC.tsv",
         diamond_hits = "output/diamond_blast_assembly1/{genotype}SC.taxified.out",
-        bams = get_assembly1_bams_from_genotype
+        covs = get_assembly1_covfiles_from_genotype
     output:
         "output/init_blobtools_database1/{genotype}.blobDB.json"
-        # Also produces cov files in outputs/produce_coverage_files1
     resources:
         mem_mb = 20000
+    params:
+        output_prefix = "output/init_blobtools_database1/{genotype}"
     log:
         "output/init_blobtools_database1/log/{genotype}.log"
-    params:
-        covdir = "output/produce_coverage_files1"
-    script:
-        "scripts/init_blobtools_database.py"
-
-rule dummy_produce_coverage_files1:
-    input:
-        expand("output/init_blobtools_database1/{genotype}.blobDB.json",
-               genotype=GENOTYPE)
-    output:
-        expand("output/produce_coverage_files1/{sample}.cov", sample=SAMPLE)
-
+    run:
+        cov_args = ' -c '.join(input.covs) 
+        shell("blobtools create -i {input.assembly} "
+              "--title {wildcards.genotype} --out {params.output_prefix} "
+              "--hitsfile {input.blast_hits} --hitsfile {input.diamond_hits} "     
+              "--nodes {config[nodes_dmp]} --names {config[names_dmp]} "
+              "-c " + cov_args + " > {log} 2>&1")
 
 rule produce_blobplots1:
     input:
         "output/init_blobtools_database1/{genotype}.blobDB.json"
     output:
-        "output/produce_blobplots1/{genotype}/family/{genotype}.bestsum.family.p20.span.100.blobplot.bam0.png",
-        "output/produce_blobplots1/{genotype}/genus/{genotype}.bestsum.genus.p20.span.100.blobplot.bam0.png",
-        "output/produce_blobplots1/{genotype}/order/{genotype}.bestsum.order.p20.span.100.blobplot.bam0.png",
-        "output/produce_blobplots1/{genotype}/phylum/{genotype}.bestsum.phylum.p20.span.100.blobplot.bam0.png",
-        "output/produce_blobplots1/{genotype}/species/{genotype}.bestsum.species.p20.span.100.blobplot.bam0.png"
+        "output/produce_blobplots1/{genotype}/family/{genotype}.bestsum.family.p20.span.100.blobplot.cov0.png",
+        "output/produce_blobplots1/{genotype}/genus/{genotype}.bestsum.genus.p20.span.100.blobplot.cov0.png",
+        "output/produce_blobplots1/{genotype}/order/{genotype}.bestsum.order.p20.span.100.blobplot.cov0.png",
+        "output/produce_blobplots1/{genotype}/phylum/{genotype}.bestsum.phylum.p20.span.100.blobplot.cov0.png",
+        "output/produce_blobplots1/{genotype}/species/{genotype}.bestsum.species.p20.span.100.blobplot.cov0.png"
     threads: 5
     resources:
         mem_mb = 40000
@@ -397,11 +419,11 @@ rule produce_blobplots1:
 
 rule produce_covplots1:
     input:
-        covplot = "output/produce_coverage_files1/{sample}.cov",
+        cov = "output/convert_alignment_to_cov1/{sample}.bam.cov",
         db = lambda wildcards: ("output/init_blobtools_database1/" + 
             get_genotype_for_sample(wildcards) + ".blobDB.json")
     output:
-        "output/produce_covplots1/{sample}.bestsum.phylum.p20.span.100.covplot.covsum.png"
+        "output/produce_covplots1/{sample}.covsum.png"
     params:
         output_prefix = "output/produce_covplots1/{sample}",
         rank = "superkingdom",
@@ -411,13 +433,13 @@ rule produce_covplots1:
 
 rule produce_covplots_excluding_bacteria:
     input:
-        covplot = "output/produce_coverage_files1/{sample}.cov",
+        cov = "output/convert_alignment_to_cov1/{sample}.bam.cov",
         db = lambda wildcards: ("output/init_blobtools_database1/" + 
             get_genotype_for_sample(wildcards) + ".blobDB.json")
     output:
-        "output/produce_covplots_excluding_bacteria/{sample}.bestsum.phylum.p20.span.100.covplot.covsum.png"
+        "output/produce_covplots_excluding_bacteria/{sample}.covsum.png"
     params:
-        output_prefix = "output/produce_covplots1/{sample}",
+        output_prefix = "output/produce_covplots_excluding_bacteria/{sample}",
         rank = "superkingdom",
         exclude = "Bacteria"
     script:
