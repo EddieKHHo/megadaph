@@ -1,11 +1,13 @@
 """Megadaph Decontamination Pipeline"""
 
+from plumbum import local
 import os
 from shutil import rmtree
 
 # ==============================================================================
 # Set up
 # ==============================================================================
+# {{{
 configfile: "config.yml"
 
 SAMPLE, PAIR = glob_wildcards(
@@ -23,24 +25,49 @@ for genotype in GENOTYPE:
 
 ITERATIONS = [1]
 FINAL_ITERATION = max(ITERATIONS)
+# }}}
 
 # ==============================================================================
 # Helper functions
 # ==============================================================================
+# {{{
+
+def get_iterations_reads(wildcards):
+    """Get the current set of reads which have passed filtering"""
+    if wildcards.iter == 1:
+        fwd_reads = os.path.join('output', 'quality_trim', 
+            wildcards.genotype + 'SC.R1.fastq.gz'),
+        rev_reads = os.path.join('output', 'quality_trim', 
+            wildcards.genotype + 'SC.R2.fastq.gz'),
+        unpaired_reads = os.path.join('output', 'quality_trim', 
+            wildcards.genotype + 'SC.merged.fastq.gz'),
+    else:
+        prev_iter = str(wildcards.iter - 1)
+        fwd_reads = os.path.join(
+            'output', 'filter_contamination'+ prev_iter,
+            wildcards.genotype + 'SC.R1.fastq.gz'),
+        rev_reads = os.path.join(
+            'output', 'filter_contamination'+ prev_iter,
+            wildcards.genotype + 'SC.R2.fastq.gz'),
+        unpaired_reads = os.path.join(
+            'output', 'filter_contamination'+ prev_iter,
+            wildcards.genotype + 'SC.unpaired.fastq.gz'),
+    return fwd_reads, rev_reads, unpaired_reads
+    
 
 def get_assembly_bams_from_genotype(wildcards):
     sample_names = get_samples_for_genotype(wildcards)
-    bam_files = ''.join(["output/align_to_assembly", wildcards.iter, "/",
+    bam_files = [''.join(["output/align_to_assembly", wildcards.iter, "/",
                          x, ".bam"])
-                 for x in sample_names]
+                         for x in sample_names]
     return bam_files
 
 
 def get_assembly_covfiles_from_genotype(wildcards):
     sample_names = get_samples_for_genotype(wildcards)
-    cov_files = ''.join(["output/convert_alignment_to_cov", wildcards.iter,
-                         x, ".bam.cov"])
-                 for x in sample_names]
+    cov_files = [''.join(["output/convert_alignment_to_cov", wildcards.iter,
+                         "/", x, ".bam.cov"])
+                         for x in sample_names]
     return cov_files
 
 
@@ -78,36 +105,45 @@ def bowtie2_idx_root(idx):
     """Given the path to a forward bowtie2 index, return its root name"""
     return os.path.splitext(os.path.splitext(idx)[0])[0]
 
+# }}}
+
 # ==============================================================================
-# Pipeline
+# Targets
 # ==============================================================================
+# {{{
 rule all:
     input:
         'output/multiqc/multiqc.html',
-        expand("output/produce_blobplots{num}/{genotype}/family/{genotype}.bestsum"
-               ".family.p20.span.100.blobplot.cov0.png", genotype=GENOTYPE),
+        expand("output/produce_blobplots{iter}/{genotype}/family/{genotype}.bestsum"
+               ".family.p20.span.100.blobplot.cov0.png", genotype=GENOTYPE,
+               iter=ITERATIONS),
         expand("output/produce_covplots{iter}/{sample}.covsum.png",
                sample=SAMPLE, iter=ITERATIONS),
-        expand("output/produce_covplots_excluding_bacteria/{sample}.covsum.png",
+        expand("output/produce_covplot_excluding_bacteria/{sample}.covsum.png",
                sample=SAMPLE),
-        expand("output/generate_inclusion_list{iter}/{genotype}.txt",
-               genotype=GENOTYPE, iter=ITERATIONS)
-        # expand("output/filter_blobtable1/{genotype}.tsv", 
-        #        genotype=GENOTYPE)
+        expand("output/filter_contamination{iter}/{sample}.R1.fastq.gz",
+               iter=ITERATIONS, sample=SAMPLE)
 
+# }}}
 
-
-rule raw_fastqc:
-    input:
-        fwd_reads = 'input/reads/{sample}.R1.fastq.gz',
-        rev_reads = 'input/reads/{sample}.R2.fastq.gz'
+# ==============================================================================
+# Build extra input files
+# ==============================================================================
+# {{{
+rule build_diamond_database:
     output:
-        'output/raw_fastqc/{sample}.R1_fastqc.html',
-        'output/raw_fastqc/{sample}.R2_fastqc.html',
-    params:
-        outdir = 'output/raw_fastqc'
-    shell:
-        "fastqc -o {params.outdir} {input.fwd_reads} {input.rev_reads}"
+        "output/build_diamond_database/uniprot_ref_proteomes.fasta",
+        "output/build_diamond_database/uniprot_ref_proteomes.dmnd",
+        "output/build_diamond_database/uniprot_ref_proteomes.taxids"
+    threads: 16
+    script:
+        "scripts/build_diamond_database.py"
+# }}}
+
+# ==============================================================================
+# Quality Control / Trimming
+# ==============================================================================
+# {{{
 
 
 rule trim_adapters:
@@ -176,51 +212,16 @@ rule quality_trim:
         "bbduk.sh in={input.merged_reads} out={output.merged_reads} "
         "qtrim={params.qtrim} trimq={params.trimq} minlen={params.minlen} "
         "threads={threads} 2> {log.unpaired}"
+# }}}
 
-
-rule clean_fastqc:
-    input:
-        fwd_reads = rules.quality_trim.output.fwd_reads,
-        rev_reads = rules.quality_trim.output.rev_reads,
-        merged_reads = rules.quality_trim.output.merged_reads
-    output:
-        'output/clean_fastqc/{sample}.R1_fastqc.html',
-        'output/clean_fastqc/{sample}.R2_fastqc.html',
-        'output/clean_fastqc/{sample}.merged_fastqc.html'
-    params:
-        outdir='output/clean_fastqc'
-    shell:
-        "fastqc -o {params.outdir} {input.fwd_reads} {input.rev_reads} "
-        "{input.merged_reads}"
-
-
-rule multiqc:
-    input:
-        expand('output/clean_fastqc/{sample}.R1_fastqc.html', sample=SAMPLE),
-        expand('output/clean_fastqc/{sample}.R2_fastqc.html', sample=SAMPLE),
-        expand(
-               'output/clean_fastqc/{sample}.merged_fastqc.html', sample=SAMPLE),
-        expand('output/raw_fastqc/{sample}.R1_fastqc.html', sample=SAMPLE),
-        expand('output/raw_fastqc/{sample}.R2_fastqc.html', sample=SAMPLE)
-    output: 'output/multiqc/multiqc.html'
-    shell:
-        'multiqc -d -n {output} .'
-
-rule build_diamond_database:
-    output:
-        "output/build_diamond_database/uniprot_ref_proteomes.fasta",
-        "output/build_diamond_database/uniprot_ref_proteomes.dmnd",
-        "output/build_diamond_database/uniprot_ref_proteomes.taxids"
-    threads: 16
-    script:
-        "scripts/build_diamond_database.py"
-
+# ==============================================================================
+# Assembly-Decontamination Iterations
+# ==============================================================================
+# {{{
 
 rule assembly:
     input:
-        fwd_reads = 'output/quality_trim/{genotype}SC.R1.fastq.gz',
-        rev_reads = 'output/quality_trim/{genotype}SC.R2.fastq.gz',
-        merged_reads = 'output/quality_trim/{genotype}SC.merged.fastq.gz'
+        fwd_reads, rev_reads, unpaired_reads = get_iterations_reads
     output:
         assembly = 'output/assembly{iter}/{genotype}SC.fasta',
         output_dir = 'output/assembly{iter}/{genotype}SC_spades'
@@ -229,7 +230,7 @@ rule assembly:
         mem_mb = 50000
     shell:
         "python2 util/spades/bin/spades.py -1 {input.fwd_reads} -2 "
-        "{input.rev_reads} -s {input.merged_reads} --threads {threads} "
+        "{input.rev_reads} -s {input.unpaired_reads} --threads {threads} "
         "-o {output.output_dir} && "
         "mv {output.output_dir}/scaffolds.fasta {output.assembly}"
 
@@ -293,7 +294,7 @@ rule taxify_diamond_blasts:
     output:
         "output/diamond_blast_assembly{iter}/{genotype}SC.taxified.out",
     params:
-        output_prefix = "output/diamond_blast_assembly1/"
+        output_prefix = "output/diamond_blast_assembly{iter}/"
     shell:
         "blobtools taxify -f {input.diamond_hits} -m {input.taxids} -s 0 -t 2 "
         "-o {params.output_prefix}"
@@ -302,9 +303,7 @@ rule align_to_assembly:
     input:
         assembly = match_assembly,
         index = match_assembly_index,
-        fwd_reads = 'output/quality_trim/{sample}.R1.fastq.gz',
-        rev_reads = 'output/quality_trim/{sample}.R2.fastq.gz',
-        merged_reads = 'output/quality_trim/{sample}.merged.fastq.gz'
+        fwd_reads, rev_reads, unpaired_reads = get_iterations_reads
     output:
         bam = 'output/align_to_assembly{iter}/{sample}.bam',
         bai = 'output/align_to_assembly{iter}/{sample}.bam.bai'
@@ -316,7 +315,7 @@ rule align_to_assembly:
     run:
         index_prefix = bowtie2_idx_root(input.index)
         shell("align_and_sort.py -1 {input.fwd_reads} -2 {input.rev_reads} -U "
-              "{input.merged_reads} -x " + index_prefix + " -p {threads} > "
+              "{input.unpaired_reads} -x " + index_prefix + " -p {threads} > "
               "{output.bam} 2> {log}")
         shell("samtools index {output.bam}")
 
@@ -377,65 +376,11 @@ rule produce_blobplots:
     shell:
         "scripts/produce_blobplots.py -o {params.output_prefix} -d {input}"
 
-#rule redundans:
-#    input:
-#        assembly = 'output/assembly1/{sample}.fasta',
-#        fwd_reads = 'output/quality_trim/{sample}.r1.fastq.gz',
-#        rev_reads = 'output/quality_trim/{sample}.r2.fastq.gz',
-#        merged_reads = 'output/quality_trim/{sample}.merged.fastq.gz'
-#    output:
-#        'output/redundans/{sample}/scaffolds.filled.fa'
-#    params:
-#        threads = 10
-#    shell:
-#        "python2 util/redundans/redundans.py -f {assembly} -i "
-#        "{input.fwd_reads} {input.rev_reads} -l {input.merged_reads} "
-#        "-r {config[reference_assembly]} -o {output} -t {params.threads}"
-
-# rule create_haplomerger_project:
-#     input:
-#         'output/assembly1/{sample}.fasta'
-#     output:
-#         'util/haplomerger2/{sample}'
-#     run:
-#         if os.path.isdir(output[0]):
-#             rmtree(output[0])
-#         shell("cp -r util/haplomerger2/template "
-#               "util/haplomerger2/{wildcards.sample}")
-#
-# rule softmask_assembly:
-#     input:
-#         projdir = 'util/haplomerger2/{sample}',
-#         assembly = 'output/assembly1/{sample}.fasta'
-#     output:
-#         'util/haplomerger2/{sample}/{sample}.fa.gz'
-#     script:
-#         "scripts/softmask_assembly.py"
-#
-# rule remove_misjoins:
-#     input:
-#         "util/haplomerger2/{sample}/{sample}.fa.gz"
-#     output:
-#         "util/haplomerger2/{sample}/{sample}_A.fa.gz"
-#     threads: 10
-#     script:
-#         "scripts/remove_misjoins.py"
-#
-# rule haploidify_assembly:
-#     input:
-#         "util/haplomerger2/{sample}/{sample}_A.fa.gz"
-#     output:
-#         "util/haplomerger2/{sample}/{sample}_A_ref.fa.gz",
-#         "util/haplomerger2/{sample}/{sample}_A_alt.fa.gz"
-#     threads: 10
-#     script:
-#         "scripts/haploidify.py"
-
 rule produce_covplots:
     input:
         cov = "output/convert_alignment_to_cov{iter}/{sample}.bam.cov",
         db = lambda wildcards: ''.join(["output/init_blobtools_database",
-                                        wilcards.iter, "/", 
+                                        wildcards.iter, "/", 
                                         get_genotype_for_sample(wildcards),
                                         ".blobDB.json"])
     output:
@@ -453,9 +398,9 @@ rule produce_covplots_excluding_bacteria:
         db = lambda wildcards: ("output/init_blobtools_database1/" + 
             get_genotype_for_sample(wildcards) + ".blobDB.json")
     output:
-        "output/produce_covplots_excluding_bacteria/{sample}.covsum.png"
+        "output/produce_covplot_excluding_bacteria/{sample}.covsum.png"
     params:
-        output_prefix = "output/produce_covplots_excluding_bacteria/{sample}",
+        output_prefix = "output/produce_covplot_excluding_bacteria/{sample}",
         rank = "superkingdom",
         exclude = "Bacteria"
     script:
@@ -488,34 +433,109 @@ rule generate_inclusion_list:
     output:
         "output/generate_inclusion_list{iter}/{genotype}.txt"
     shell:
-        "intersect.sh {input.failed_list} \"$(list_csomes {input.assembly})\""
+        "list_csomes {input.assembly} | complement.sh /dev/stdin "
+        "{input.failed_list} > {output}"
 
 
 rule filter_contamination:
     input:
-        contam_contigs = ''.join(["output/find_contam_contigs", wildcards.iter, 
-                                  "/", get_genotype_for_sample,
-                                  ".blobDB.bestsum.table.txt"]),
-        bam <- "output/align_to_assmbly{iter}/{sample}.bam"
+        passing_contigs = lambda wildcards: ''.join([
+            "output/generate_inclusion_list", wildcards.iter, "/", 
+            get_genotype_for_sample(wildcards), ".txt"]),
+        bam = "output/align_to_assembly{iter}/{sample}.bam"
     output:
-        "output/filter_contamination{iter}/{sample}.R1.fastq.gz",
-        "output/filter_contamination{iter}/{sample}.R2.fastq.gz",
-        "output/filter_contamination{iter}/{sample}.unpaired.fastq.gz",
-        "output/filter_contamination{iter}/{sample}.passing.txt"
+        fwd = "output/filter_contamination{iter}/{sample}.R1.fastq.gz",
+        rev = "output/filter_contamination{iter}/{sample}.R2.fastq.gz",
+        unpaired = "output/filter_contamination{iter}/{sample}.merged.fastq.gz"
     threads: 16
+    resources:
+        mem_mb = 30000
     params:
         output_prefix = "output/filter_contamination{iter}/{sample}"
     run:
-        # File containing the contig names which passed filtering
-        inclusion_file
-        shell("")
+        tmp_bam = params.output_prefix + ".bam"
+        # Extract the passing contigs from the input bam
+        shell("samtools view -@ {threads} -bh {input.bam} "
+              "$(cat {input.passing_contigs}) | samtools sort -@ {threads} > " + 
+              tmp_bam)
+        shell("samtools index " + tmp_bam)
+        shell("samtools fastq -s {output.unpaired} -1 {output.fwd} "
+              "-2 {output.rev} " + tmp_bam)
+        os.remove(tmp_bam)
 
-        shell("sambamba view {input.bam} \"$())
-        # NEED TO WRITE A FUNCTION TO FILTER THE BAM MYSELF
-        shell("blobtools bamfilter --sort -b {input.bam} --exclude "
-              "{input.contam_contigs} --threads {threads} --include_unmapped "
-              "-o {params.output_prefix}")
-        output_included <- [output_prefix + suffix 
-                            for suffix in [".InIn.fq", ".InUn.fq", "UnUn.fq"]]
-        output_included_string <- ' '.join(output_included)
-        shell("cat " + output_included_string + "> ")
+# }}}
+
+# ==============================================================================
+# Summarize Pipeline
+# ==============================================================================
+# {{{
+        
+rule raw_fastqc:
+    input:
+        fwd_reads = 'input/reads/{sample}.R1.fastq.gz',
+        rev_reads = 'input/reads/{sample}.R2.fastq.gz'
+    output:
+        'output/raw_fastqc/{sample}.R1_fastqc.html',
+        'output/raw_fastqc/{sample}.R2_fastqc.html',
+    params:
+        outdir = 'output/raw_fastqc'
+    shell:
+        "fastqc -o {params.outdir} {input.fwd_reads} {input.rev_reads}"
+
+rule clean_fastqc:
+    input:
+        fwd_reads = 'output/quality_trim/{sample}.R1.fastq.gz',
+        rev_reads = 'output/quality_trim/{sample}.R2.fastq.gz',
+        unpaired_reads = 'output/quality_trim/{sample}.merged.fastq.gz'
+    output:
+        'output/clean_fastqc/{sample}.R1_fastqc.html',
+        'output/clean_fastqc/{sample}.R2_fastqc.html',
+        'output/clean_fastqc/{sample}.merged_fastqc.html'
+    params:
+        outdir='output/clean_fastqc'
+    shell:
+        "fastqc -o {params.outdir} {input.fwd_reads} {input.rev_reads} "
+        "{input.merged_reads}"
+
+rule contam_filter_fastqc:
+    input:
+        fwd_reads = 'output/filter_contamination{iter}/{sample}.R1.fastq.gz',
+        rev_reads = 'output/filter_contamination{iter}/{sample}.R2.fastq.gz',
+        unpaired_reads = 'output/filter_contamination{iter}/{sample}.unpaired' +
+            '.fastq.gz'
+    output:
+        'output/contam_filter_fastqc{iter}.R1_fastqc.html',
+        'output/contam_filter_fastqc{iter}.R2_fastqc.html',
+        'output/contam_filter_fastqc{iter}.unpaired_fastqc.html'
+    params:
+        outdir = 'output/contam_filter_fastqc'
+    shell:
+        "fastqc -o {params.outdir} {input.fwd_reads} {input.rev_reads} "
+        "{input.unpaired_reads}"
+    
+rule multiqc:
+    input:
+        expand('output/contam_filter_fastqc{iter}.R1_fastqc.html', 
+               iter=ITERATIONS, sample=SAMPLE),
+        expand('output/contam_filter_fastqc{iter}.R2_fastqc.html', 
+               iter=ITERATIONS, sample=SAMPLE),
+        expand('output/contam_filter_fastqc{iter}.unpaired_fastqc.html', 
+               iter=ITERATIONS, sample=SAMPLE),
+    output: 'output/multiqc/multiqc.html'
+    shell:
+        'multiqc -d -n {output} .'
+
+
+rule summarize_filter_contamination:
+    input:
+        pre_fwd = 'output/assembly_input{iter}/{sample}.R1.fastq.gz',
+        pre_rev = 'output/assembly_input{iter}/{sample}.R2.fastq.gz',
+        pre_unpaired = 'output/assembly_input{iter/{sample}.merged.fastq.gz',
+        post_fwd = "output/filter_contamination{iter}/{sample}.R1.fastq.gz",
+~       post_rev = "output/filter_contamination{iter}/{sample}.R2.fastq.gz",
+~_      post_unpaired = "output/filter_contamination{iter}/{sample}.merged.fastq.gz"  
+EXPAND THEM
+    output:
+        'output/summarize_filter_contamination{iter}/summary.txt'
+
+# }}}
