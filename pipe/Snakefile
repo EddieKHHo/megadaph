@@ -1,8 +1,10 @@
 """Megadaph Decontamination Pipeline"""
-
-from plumbum import local
 import os
 from shutil import rmtree
+from tempfile import TemporaryDirectory
+
+from plumbum import local
+from plumbum.cmd import cat
 
 # ==============================================================================
 # Set up
@@ -462,17 +464,26 @@ rule filter_contamination:
         mem_mb = 30000
     params:
         output_prefix = "output/filter_contamination1/{sample}"
+    log:
+        "output/filter_contamination1/logs/{sample}.log"
     run:
-        tmp_bam = params.output_prefix + ".bam"
-        # Extract the passing contigs from the input bam
-        shell("samtools view -@ {threads} -bh {input.bam} "
-              "$(cat {input.passing_contigs}) | samtools sort -@ {threads} > " + 
-              tmp_bam)
-        shell("samtools index " + tmp_bam)
-        shell("samtools fastq -s {output.unpaired} -1 {output.fwd} "
-              "-2 {output.rev} " + tmp_bam)
-        os.remove(tmp_bam)
+        with TemporaryDirectory() as tmpdir:
+            region_list = cat.run(input.passing_contigs)[1].split("\n")
 
+            ## We need to split the region list into chunks so that we don't
+            ## hit ARGS_MAX
+            tmp_bam = params.output_prefix + ".bam"
+            # Get the list of passing contigs and convert to a comma-separated
+            # string
+            region_list = cat.run(input.passing_contigs)[1]
+            # Extract the passing contigs from the input bam
+            shell("samtools view -@ {threads} -bh {input.bam} " + region_list + 
+                  "| samtools sort -@ {threads} > " + tmp_bam)
+            shell("samtools index " + tmp_bam)
+            shell("samtools fastq -0 {output.unpaired} -1 {output.fwd} "
+                  "-2 {output.rev} " + tmp_bam + "> {log}")
+            os.remove(tmp_bam)
+            
 # }}} 
 
 # ==============================================================================
@@ -518,18 +529,18 @@ rule contam_filter_fastqc:
         'output/contam_filter_fastqc1/{sample}.R2_fastqc.html',
         'output/contam_filter_fastqc1/{sample}.unpaired_fastqc.html'
     params:
-        outdir = 'output/contam_filter_fastqc'
+        outdir = 'output/contam_filter_fastqc1'
     shell:
         "fastqc -o {params.outdir} {input.fwd_reads} {input.rev_reads} "
         "{input.unpaired_reads}"
     
 rule multiqc:
     input:
-        expand('output/contam_filter_fastqc1.R1_fastqc.html', 
+        expand('output/contam_filter_fastqc1/{sample}.R1_fastqc.html', 
                iter=ITERATIONS, sample=SAMPLE),
-        expand('output/contam_filter_fastqc1.R2_fastqc.html', 
+        expand('output/contam_filter_fastqc1/{sample}.R2_fastqc.html', 
                iter=ITERATIONS, sample=SAMPLE),
-        expand('output/contam_filter_fastqc1.unpaired_fastqc.html', 
+        expand('output/contam_filter_fastqc1/{sample}.unpaired_fastqc.html', 
                iter=ITERATIONS, sample=SAMPLE),
     output: 'output/multiqc/multiqc.html'
     shell:
