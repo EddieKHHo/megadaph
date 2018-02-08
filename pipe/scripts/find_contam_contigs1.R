@@ -27,5 +27,5 @@ main <- function(blobtable) {
 if (!interactive()) {
   blobtable_file <- commandArgs(trailingOnly = TRUE)
   blobtable <- read_blobtable(blobtable_file)
-  main(blobtable, output_filename)
+  main(blobtable)
 }
