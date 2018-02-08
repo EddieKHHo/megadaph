@@ -7,7 +7,7 @@ from shutil import rmtree
 # ==============================================================================
 # Set up
 # ==============================================================================
-# {{{
+# {{{{
 configfile: "config.yml"
 
 SAMPLE, PAIR = glob_wildcards(
@@ -23,9 +23,9 @@ GENOTYPE_SAMPLE = {}
 for genotype in GENOTYPE:
     GENOTYPE_SAMPLE[genotype] = [x for x in SAMPLE if x.startswith(genotype)]
 
-ITERATIONS = [1]
+ITERATIONS = [1, 2]
 FINAL_ITERATION = max(ITERATIONS)
-# }}}
+# }}}}
 
 # ==============================================================================
 # Helper functions
@@ -34,25 +34,31 @@ FINAL_ITERATION = max(ITERATIONS)
 
 def get_iterations_reads(wildcards):
     """Get the current set of reads which have passed filtering"""
-    if wildcards.iter == 1:
-        fwd_reads = os.path.join('output', 'quality_trim', 
-            wildcards.genotype + 'SC.R1.fastq.gz'),
-        rev_reads = os.path.join('output', 'quality_trim', 
-            wildcards.genotype + 'SC.R2.fastq.gz'),
-        unpaired_reads = os.path.join('output', 'quality_trim', 
-            wildcards.genotype + 'SC.merged.fastq.gz'),
+    try:
+        smp = wildcards.sample
+    except AttributeError:
+        smp = wildcards.genotype + 'SC'
+
+    outdict = {}
+    if int(wildcards.iter) == 1:
+        outdict['fwd_reads'] = os.path.join('output', 'quality_trim', 
+            smp + '.R1.fastq.gz'),
+        outdict['rev_reads'] = os.path.join('output', 'quality_trim', 
+            smp + '.R2.fastq.gz'),
+        outdict['unpaired_reads'] = os.path.join('output', 'quality_trim', 
+            smp + '.merged.fastq.gz'),
     else:
-        prev_iter = str(wildcards.iter - 1)
-        fwd_reads = os.path.join(
+        prev_iter = str(int(wildcards.iter) - 1)
+        outdict['fwd_reads'] = os.path.join(
             'output', 'filter_contamination'+ prev_iter,
-            wildcards.genotype + 'SC.R1.fastq.gz'),
-        rev_reads = os.path.join(
+            smp + '.R1.fastq.gz'),
+        outdict['rev_reads'] = os.path.join(
             'output', 'filter_contamination'+ prev_iter,
-            wildcards.genotype + 'SC.R2.fastq.gz'),
-        unpaired_reads = os.path.join(
+            smp + '.R2.fastq.gz'),
+        outdict['unpaired_reads'] = os.path.join(
             'output', 'filter_contamination'+ prev_iter,
-            wildcards.genotype + 'SC.unpaired.fastq.gz'),
-    return fwd_reads, rev_reads, unpaired_reads
+            smp + '.unpaired.fastq.gz'),
+    return outdict
     
 
 def get_assembly_bams_from_genotype(wildcards):
@@ -121,9 +127,10 @@ rule all:
                sample=SAMPLE, iter=ITERATIONS),
         expand("output/produce_covplot_excluding_bacteria/{sample}.covsum.png",
                sample=SAMPLE),
-        expand("output/filter_contamination{iter}/{sample}.R1.fastq.gz",
-               iter=ITERATIONS, sample=SAMPLE)
-
+        expand("output/filter_contamination1/{sample}.R1.fastq.gz",
+               sample=SAMPLE),
+        expand("output/produce_blobtable{iter}/{genotype}.blobDB.bestsum.table.txt",
+               genotype=GENOTYPE, iter=ITERATIONS)
 # }}}
 
 # ==============================================================================
@@ -144,7 +151,6 @@ rule build_diamond_database:
 # Quality Control / Trimming
 # ==============================================================================
 # {{{
-
 
 rule trim_adapters:
     input:
@@ -221,7 +227,7 @@ rule quality_trim:
 
 rule assembly:
     input:
-        fwd_reads, rev_reads, unpaired_reads = get_iterations_reads
+        unpack(get_iterations_reads)
     output:
         assembly = 'output/assembly{iter}/{genotype}SC.fasta',
         output_dir = 'output/assembly{iter}/{genotype}SC_spades'
@@ -239,9 +245,10 @@ rule length_filter_assembly:
         'output/assembly{iter}/{genotype}SC.fasta'
     output:
         'output/length_filter_assembly{iter}/{genotype}SC.fasta'
+    params:
+        minlen = "200"
     shell:
-        "bioawk -c fastx '{{ if(length($seq) > 200) {{ print \">\"$name; print "
-        "$seq }}}}' {input} > {output}"
+        "length_filter_fastq.pl {params.minlen} {input} > {output}"
 
 rule bowtie2_index_assembly:
     input:
@@ -301,9 +308,9 @@ rule taxify_diamond_blasts:
 
 rule align_to_assembly:
     input:
+        unpack(get_iterations_reads),
         assembly = match_assembly,
-        index = match_assembly_index,
-        fwd_reads, rev_reads, unpaired_reads = get_iterations_reads
+        index = match_assembly_index
     output:
         bam = 'output/align_to_assembly{iter}/{sample}.bam',
         bai = 'output/align_to_assembly{iter}/{sample}.bam.bai'
@@ -419,19 +426,19 @@ rule produce_blobtable:
 # List the contigs which failed the filtering step
 rule find_contam_contigs:
     input:
-        "output/produce_blobtable{iter}/{genotype}.blobDB.bestsum.table.txt"
+        "output/produce_blobtable1/{genotype}.blobDB.bestsum.table.txt"
     output:
-        "output/find_contam_contigs{iter}/{genotype}.txt"
+        "output/find_contam_contigs1/{genotype}.txt"
     shell:
-        "scripts/find_contam_contigs.R {input} > {output}"
+        "scripts/find_contam_contigs1.R {input} > {output}"
 
 # List the contigs which passed the filtering step
 rule generate_inclusion_list:
     input:
-        failed_list = "output/find_contam_contigs{iter}/{genotype}.txt",
-        assembly = "output/assembly{iter}/{genotype}SC.fasta"
+        failed_list = "output/find_contam_contigs1/{genotype}.txt",
+        assembly = "output/assembly1/{genotype}SC.fasta"
     output:
-        "output/generate_inclusion_list{iter}/{genotype}.txt"
+        "output/generate_inclusion_list1/{genotype}.txt"
     shell:
         "list_csomes {input.assembly} | complement.sh /dev/stdin "
         "{input.failed_list} > {output}"
@@ -439,19 +446,22 @@ rule generate_inclusion_list:
 
 rule filter_contamination:
     input:
+        #passing_contigs = lambda wildcards: ''.join([
+        #    "output/generate_inclusion_list", wildcards.iter, "/", 
+        #    get_genotype_for_sample(wildcards), ".txt"]),
         passing_contigs = lambda wildcards: ''.join([
-            "output/generate_inclusion_list", wildcards.iter, "/", 
+            "output/generate_inclusion_list1/", 
             get_genotype_for_sample(wildcards), ".txt"]),
-        bam = "output/align_to_assembly{iter}/{sample}.bam"
+        bam = "output/align_to_assembly1/{sample}.bam"
     output:
-        fwd = "output/filter_contamination{iter}/{sample}.R1.fastq.gz",
-        rev = "output/filter_contamination{iter}/{sample}.R2.fastq.gz",
-        unpaired = "output/filter_contamination{iter}/{sample}.merged.fastq.gz"
+        fwd = "output/filter_contamination1/{sample}.R1.fastq.gz",
+        rev = "output/filter_contamination1/{sample}.R2.fastq.gz",
+        unpaired = "output/filter_contamination1/{sample}.unpaired.fastq.gz"
     threads: 16
     resources:
         mem_mb = 30000
     params:
-        output_prefix = "output/filter_contamination{iter}/{sample}"
+        output_prefix = "output/filter_contamination1/{sample}"
     run:
         tmp_bam = params.output_prefix + ".bam"
         # Extract the passing contigs from the input bam
@@ -463,7 +473,7 @@ rule filter_contamination:
               "-2 {output.rev} " + tmp_bam)
         os.remove(tmp_bam)
 
-# }}}
+# }}} 
 
 # ==============================================================================
 # Summarize Pipeline
@@ -499,14 +509,14 @@ rule clean_fastqc:
 
 rule contam_filter_fastqc:
     input:
-        fwd_reads = 'output/filter_contamination{iter}/{sample}.R1.fastq.gz',
-        rev_reads = 'output/filter_contamination{iter}/{sample}.R2.fastq.gz',
-        unpaired_reads = 'output/filter_contamination{iter}/{sample}.unpaired' +
+        fwd_reads = 'output/filter_contamination1/{sample}.R1.fastq.gz',
+        rev_reads = 'output/filter_contamination1/{sample}.R2.fastq.gz',
+        unpaired_reads = 'output/filter_contamination1/{sample}.unpaired' +
             '.fastq.gz'
     output:
-        'output/contam_filter_fastqc{iter}.R1_fastqc.html',
-        'output/contam_filter_fastqc{iter}.R2_fastqc.html',
-        'output/contam_filter_fastqc{iter}.unpaired_fastqc.html'
+        'output/contam_filter_fastqc1/{sample}.R1_fastqc.html',
+        'output/contam_filter_fastqc1/{sample}.R2_fastqc.html',
+        'output/contam_filter_fastqc1/{sample}.unpaired_fastqc.html'
     params:
         outdir = 'output/contam_filter_fastqc'
     shell:
@@ -515,27 +525,13 @@ rule contam_filter_fastqc:
     
 rule multiqc:
     input:
-        expand('output/contam_filter_fastqc{iter}.R1_fastqc.html', 
+        expand('output/contam_filter_fastqc1.R1_fastqc.html', 
                iter=ITERATIONS, sample=SAMPLE),
-        expand('output/contam_filter_fastqc{iter}.R2_fastqc.html', 
+        expand('output/contam_filter_fastqc1.R2_fastqc.html', 
                iter=ITERATIONS, sample=SAMPLE),
-        expand('output/contam_filter_fastqc{iter}.unpaired_fastqc.html', 
+        expand('output/contam_filter_fastqc1.unpaired_fastqc.html', 
                iter=ITERATIONS, sample=SAMPLE),
     output: 'output/multiqc/multiqc.html'
     shell:
         'multiqc -d -n {output} .'
-
-
-rule summarize_filter_contamination:
-    input:
-        pre_fwd = 'output/assembly_input{iter}/{sample}.R1.fastq.gz',
-        pre_rev = 'output/assembly_input{iter}/{sample}.R2.fastq.gz',
-        pre_unpaired = 'output/assembly_input{iter/{sample}.merged.fastq.gz',
-        post_fwd = "output/filter_contamination{iter}/{sample}.R1.fastq.gz",
-~       post_rev = "output/filter_contamination{iter}/{sample}.R2.fastq.gz",
-~_      post_unpaired = "output/filter_contamination{iter}/{sample}.merged.fastq.gz"  
-EXPAND THEM
-    output:
-        'output/summarize_filter_contamination{iter}/summary.txt'
-
 # }}}

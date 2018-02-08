@@ -16,8 +16,8 @@ source("lib/R/blobtools_util.R")
 
 main <- function(blobtable) {
   exclusions <- filter(blobtable,
-    superkingdom.t == "Bacteria" | grepl("ophyta", phylum.t) | GC > 0.6 |
-      cov_sum < 10) %>%
+    superkingdom.t %in% c("Bacteria", "Viruses", "Archaea") |
+      grepl("ophyta", phylum.t) | GC > 0.6 | cov_sum < 10) %>%
     select(name)
   exclusions <- noquote(unlist(exclusions))
   exclusions_string <- paste(exclusions, collapse = "\n")
