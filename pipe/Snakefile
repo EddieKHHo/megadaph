@@ -468,7 +468,7 @@ rule filter_contamination:
         "output/filter_contamination1/logs/{sample}.log"
     shell:
         "extract_csomes.py -p {threads} -o {params.output_prefix} "
-        "-i {input.passing_contigs} {input.bam}"
+        "-i {input.passing_contigs} -f fastq {input.bam}"
 # }}} 
 
 # ==============================================================================
