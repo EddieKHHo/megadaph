@@ -466,24 +466,9 @@ rule filter_contamination:
         output_prefix = "output/filter_contamination1/{sample}"
     log:
         "output/filter_contamination1/logs/{sample}.log"
-    run:
-        with TemporaryDirectory() as tmpdir:
-            region_list = cat.run(input.passing_contigs)[1].split("\n")
-
-            ## We need to split the region list into chunks so that we don't
-            ## hit ARGS_MAX
-            tmp_bam = params.output_prefix + ".bam"
-            # Get the list of passing contigs and convert to a comma-separated
-            # string
-            region_list = cat.run(input.passing_contigs)[1]
-            # Extract the passing contigs from the input bam
-            shell("samtools view -@ {threads} -bh {input.bam} " + region_list + 
-                  "| samtools sort -@ {threads} > " + tmp_bam)
-            shell("samtools index " + tmp_bam)
-            shell("samtools fastq -0 {output.unpaired} -1 {output.fwd} "
-                  "-2 {output.rev} " + tmp_bam + "> {log}")
-            os.remove(tmp_bam)
-            
+    shell:
+        "extract_csomes.py -p {threads} -o {params.output_prefix} "
+        "-i {input.passing_contigs} {input.bam}"
 # }}} 
 
 # ==============================================================================
