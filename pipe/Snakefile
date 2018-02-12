@@ -1,7 +1,11 @@
 """Megadaph Decontamination Pipeline"""
 import os
-from shutil import rmtree
-from tempfile import TemporaryDirectory
+from shutil import (
+    move,
+    rmtree,
+)
+from tempfile import NamedTemporaryFile
+from uuid import uuid4
 
 from plumbum import local
 from plumbum.cmd import cat
@@ -250,7 +254,7 @@ rule length_filter_assembly:
     params:
         minlen = "200"
     shell:
-        "length_filter_fastq.pl {params.minlen} {input} > {output}"
+        "length_filter_fasta.pl {params.minlen} {input} > {output}"
 
 rule bowtie2_index_assembly:
     input:
@@ -461,14 +465,22 @@ rule filter_contamination:
         unpaired = "output/filter_contamination1/{sample}.unpaired.fastq.gz"
     threads: 16
     resources:
-        mem_mb = 30000
+        mem_mb = 40000
     params:
         output_prefix = "output/filter_contamination1/{sample}"
     log:
         "output/filter_contamination1/logs/{sample}.log"
-    shell:
-        "extract_csomes.py -p {threads} -o {params.output_prefix} "
-        "-i {input.passing_contigs} -f fastq {input.bam}"
+    run:
+        shell("extract_csomes.py -n 200 -p {threads} -o {params.output_prefix} "
+        "-i {input.passing_contigs} -f fastq {input.bam} 2> {log}")
+        outdir = local.path(output.unpaired).dirname
+        tmp = outdir / (uuid4().hex + '.fastq.gz')
+        # Remove all unpaired reads which are not merged
+        shell("zcat {output.unpaired} | paste - - - - | awk "
+              "'length($2) >= 151' | sed 's/\\t/\\n/g' | gzip - > " + str(tmp))
+        move(str(tmp), output.unpaired)
+
+
 # }}} 
 
 # ==============================================================================
