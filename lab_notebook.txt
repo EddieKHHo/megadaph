@@ -1,3 +1,4 @@
+===============================================================================
 Fenner Macrae Megadaph - Nuclear Analysis Lab Notebook
 ===============================================================================
 
@@ -634,3 +635,53 @@ of heterozygous positions is probably inevitable though.
 January 16th, 2018
 ================================================================================
 - Typo in bowtie2 alignment, requeued pipeline.
+
+================================================================================
+January 21st, 2018
+================================================================================
+- The initial bowtie2 alignments completed successfully.
+
+================================================================================
+January 22nd, 2018
+================================================================================
+- Added Diamond BLAST step to pipeline, didn't get a chance to properly test it,
+so will probably die with an error, but submitted it to SLURM just in case.
+
+================================================================================
+January 23rd, 2018
+================================================================================
+- Worked out the kinks in the diamond database construction script. Schedule the
+diamond BLAST runs on SLURM.
+
+================================================================================
+January 31st, 2018
+================================================================================
+- Diamond BLAST searches successfully completed after a false start. Now running
+  blobtools database initialization.
+
+================================================================================
+February 2nd, 2018
+================================================================================
+Initial round of blobplot and covplots are complete. 
+
+--------------------------------------------------------------------------------
+Notes on initial plots
+--------------------------------------------------------------------------------
+- Major contaminant groups:
+Proteobacteria, Bacteria-undef, Cyanobacteria, Actinobacteria. 
+- Should be safe just removing all bacterial reads. 
+- Initial inspection suggests that mitosporidial contigs
+  Daphnia.
+
+Plan for first round of contamination removal:
+- Remove all contigs with bacterial and plant taxonomic assignments.
+- Remove all contigs with GC content > 0.6 or coverage < 20
+- Potentially remove extra contigs based on coverage plots.
+
+================================================================================
+February 13th, 2018
+================================================================================
+- Initial round of decontamination completed. Adjusted removal criteria remove:
+1. Contigs with bacterial/plant/archaeal/viral taxonomic assignments
+2. Contigs with GC > 0.6
+3. Contigs with coverage < 10
