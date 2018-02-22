@@ -7,7 +7,12 @@ from shutil import (
 from tempfile import NamedTemporaryFile
 from uuid import uuid4
 
-from plumbum import local
+from Bio.Blast.Applications import NcbiblastnCommandline
+from Bio.Blast import NCBIXML
+from plumbum import (
+    FG,
+    local,
+)
 from plumbum.cmd import cat
 
 # ==============================================================================
@@ -29,7 +34,7 @@ GENOTYPE_SAMPLE = {}
 for genotype in GENOTYPE:
     GENOTYPE_SAMPLE[genotype] = [x for x in SAMPLE if x.startswith(genotype)]
 
-ITERATIONS = [1, 2]
+ITERATIONS = [1, 2, 3]
 FINAL_ITERATION = max(ITERATIONS)
 # }}}}
 
@@ -113,6 +118,19 @@ def match_assembly_index(wildcards):
                         starting_control + ".1.bt2")
 
 
+def get_exclusion_list(wildcards):
+    '''Given the genotype and decontamination iteration, return the list of 
+    contigs to exclude from the assembly'''
+    if wildcards.iter == 1:
+        exclusion_list = ''.join([
+            'output/find_contam_contigs1/', wildcards.genotype, '.txt'])
+    else if wildcards.iter == 2:
+        exclusion_list = ''.join([
+            'output/find_contam_contigs2/', wildcards.genotype,
+            '_with_mitochondrial.txt'])
+    return exclusion_list
+
+
 def bowtie2_idx_root(idx):
     """Given the path to a forward bowtie2 index, return its root name"""
     return os.path.splitext(os.path.splitext(idx)[0])[0]
@@ -131,12 +149,9 @@ rule all:
                iter=ITERATIONS),
         expand("output/produce_covplots{iter}/{sample}.covsum.png",
                sample=SAMPLE, iter=ITERATIONS),
-        expand("output/produce_covplot_excluding_bacteria/{sample}.covsum.png",
-               sample=SAMPLE),
-        expand("output/filter_contamination1/{sample}.R1.fastq.gz",
-               sample=SAMPLE),
-        expand("output/produce_blobtable{iter}/{genotype}.blobDB.bestsum.table.txt",
-               genotype=GENOTYPE, iter=ITERATIONS)
+        ## TODO
+        expand("output/filter_contamination{iter}/{sample}.R1.fastq.gz",
+               sample=SAMPLE, iter=[1:2])
 # }}}
 
 # ==============================================================================
@@ -253,8 +268,7 @@ rule length_filter_assembly:
         'output/length_filter_assembly{iter}/{genotype}SC.fasta'
     params:
         minlen = "200"
-    shell:
-        "length_filter_fasta.pl {params.minlen} {input} > {output}"
+    shell: "length_filter_fasta.pl {params.minlen} {input} > {output}"
 
 rule bowtie2_index_assembly:
     input:
@@ -406,20 +420,6 @@ rule produce_covplots:
     script:
         "scripts/produce_covplots.py"
 
-rule produce_covplots_excluding_bacteria:
-    input:
-        cov = "output/convert_alignment_to_cov1/{sample}.bam.cov",
-        db = lambda wildcards: ("output/init_blobtools_database1/" + 
-            get_genotype_for_sample(wildcards) + ".blobDB.json")
-    output:
-        "output/produce_covplot_excluding_bacteria/{sample}.covsum.png"
-    params:
-        output_prefix = "output/produce_covplot_excluding_bacteria/{sample}",
-        rank = "superkingdom",
-        exclude = "Bacteria"
-    script:
-        "scripts/produce_covplots.py"
-
 rule produce_blobtable:
     input:
         db = "output/init_blobtools_database{iter}/{genotype}.blobDB.json"
@@ -433,44 +433,70 @@ rule produce_blobtable:
 # List the contigs which failed the filtering step
 rule find_contam_contigs:
     input:
-        "output/produce_blobtable1/{genotype}.blobDB.bestsum.table.txt"
+        "output/produce_blobtable{iter}/{genotype}.blobDB.bestsum.table.txt"
     output:
-        "output/find_contam_contigs1/{genotype}.txt"
+        "output/find_contam_contigs{iter}/{genotype}.txt"
+    params:
+        find_contam_contigs = 'scripts/find_contam_contigs{iter}.R'
     shell:
-        "scripts/find_contam_contigs1.R {input} > {output}"
+        '{params.find_contam_contigs} {input} > {output}'
+
+# List the mitochondrial contigs in the assembly
+# This was left out of the first round of decontamination, if assemblies need
+# to be started from scratch in the future, this should be altered to operate
+# on assembly1
+rule find_mitochondrial_contigs:
+    input:
+        'output/assembly2/{genotype}SC.fasta'
+    output:
+        list = 'output/find_mitochondrial_contigs/{genotype}.txt',
+        blast = 'output/find_mitochondrial_contigs/{genotype}.xml'
+    run:
+        # BLAST assembly vs. mtdna
+        shell('blastn -subject {input} -query {config.mitochondrial_reference} '
+              '-num_alignments 10 -outfmt 6 -evalue 1e-70 > {output.blast}')
+        # Get the contig names
+        shell('cat {output.blast} | cut -f 2 > {output.list}')
+
+rule add_mitochondrial_contigs_to_exclusions:
+    input:
+        mito = 'output/find_mitochondrial_contigs/{genotype}.txt',
+        other_contam = 'output/find_contam_contigs2/{genotype}.txt'
+    output:
+        'output/find_contam_contigs2/{genotype}_with_mitochondrial.txt'
+    shell:
+        'cat {input.mito} {input.other_contam} > {output}'
+        
 
 # List the contigs which passed the filtering step
 rule generate_inclusion_list:
     input:
-        failed_list = "output/find_contam_contigs1/{genotype}.txt",
+        exclusions = get_exclusion_list
         assembly = "output/assembly1/{genotype}SC.fasta"
     output:
-        "output/generate_inclusion_list1/{genotype}.txt"
+        "output/generate_inclusion_list{iter}/{genotype}.txt"
     shell:
         "list_csomes {input.assembly} | complement.sh /dev/stdin "
-        "{input.failed_list} > {output}"
+        "{input.exclusions} > {output}"
 
 
 rule filter_contamination:
     input:
-        #passing_contigs = lambda wildcards: ''.join([
-        #    "output/generate_inclusion_list", wildcards.iter, "/", 
-        #    get_genotype_for_sample(wildcards), ".txt"]),
         passing_contigs = lambda wildcards: ''.join([
-            "output/generate_inclusion_list1/", 
+            "output/generate_inclusion_list", wildcards.iter, "/", 
             get_genotype_for_sample(wildcards), ".txt"]),
-        bam = "output/align_to_assembly1/{sample}.bam"
+        bam = "output/align_to_assembly{iter}/{sample}.bam"
     output:
-        fwd = "output/filter_contamination1/{sample}.R1.fastq.gz",
-        rev = "output/filter_contamination1/{sample}.R2.fastq.gz",
-        unpaired = "output/filter_contamination1/{sample}.unpaired.fastq.gz"
+        fwd = "output/filter_contamination{iter}/{sample}.R1.fastq.gz",
+        rev = "output/filter_contamination{iter}/{sample}.R2.fastq.gz",
+        unpaired = "output/filter_contamination{iter}/{sample}.unpaired.fastq.gz"
     threads: 16
     resources:
         mem_mb = 40000
     params:
-        output_prefix = "output/filter_contamination1/{sample}"
+        output_prefix = "output/filter_contamination{iter}/{sample}"
     log:
-        "output/filter_contamination1/logs/{sample}.log"
+        "output/filter_contamination{iter}/logs/{sample}.log"
     run:
         # This step removes all reads which are not mapped to a contig in the
         # inclusion list (this includes unmapped reads).
@@ -483,7 +509,6 @@ rule filter_contamination:
         shell("zcat {output.unpaired} | paste - - - - | awk "
               "'length($2) >= 151' | sed 's/\\t/\\n/g' | gzip - > " + str(tmp))
         move(str(tmp), output.unpaired)
-
 
 # }}} 
 
@@ -521,28 +546,72 @@ rule clean_fastqc:
 
 rule contam_filter_fastqc:
     input:
-        fwd_reads = 'output/filter_contamination1/{sample}.R1.fastq.gz',
-        rev_reads = 'output/filter_contamination1/{sample}.R2.fastq.gz',
-        unpaired_reads = 'output/filter_contamination1/{sample}.unpaired' +
+        fwd_reads = 'output/filter_contamination{iter}/{sample}.R1.fastq.gz',
+        rev_reads = 'output/filter_contamination{iter}/{sample}.R2.fastq.gz',
+        unpaired_reads = 'output/filter_contamination{iter}/{sample}.unpaired' +
             '.fastq.gz'
     output:
-        'output/contam_filter_fastqc1/{sample}.R1_fastqc.html',
-        'output/contam_filter_fastqc1/{sample}.R2_fastqc.html',
-        'output/contam_filter_fastqc1/{sample}.unpaired_fastqc.html'
+        'output/contam_filter_fastqc{iter}/{sample}.R1_fastqc.html',
+        'output/contam_filter_fastqc{iter}/{sample}.R2_fastqc.html',
+        'output/contam_filter_fastqc{iter}/{sample}.unpaired_fastqc.html'
     params:
-        outdir = 'output/contam_filter_fastqc1'
+        outdir = 'output/contam_filter_fastqc{iter}'
     shell:
         "fastqc -o {params.outdir} {input.fwd_reads} {input.rev_reads} "
         "{input.unpaired_reads}"
     
+rule quast:
+    input:
+        unpack(get_iterations_reads),
+        assembly = 'output/assembly{iter}/{genotype}SC.fasta',
+    output:
+        'output/quast{iter}/{genotype}/report.html
+    threads: 6
+    params:
+        outdir = "output/quast{iter}/{genotype}"
+    resources:
+        mem_mb = 40000
+    shell:
+        "quast.py -o {params.outdir} --eukaryote -1 {input.fwd_reads} "
+        "-2 {input.rev_reads} -t {threads} --no-snps {input.assembly}"
+
+
+rule busco:
+    input:
+        'output/assembly{iter}/{genotype}SC.fasta'
+    output:
+        'output/busco{iter}/{genotype}/short_summary_busco.txt'
+    threads: 8
+    run:
+        shell('export BUSCO_CONFIG_FILE={config.busco_config}')
+        shell('export AUGUSTUS_CONFIG_PATH={config.augustus_config}')
+
+        output_dir = local.path('output') / wildcards.genotype
+        assembly = local.path(input)
+        lineage_file = local.path(params.busco_database)
+        busco = local['busco']
+        tmp_outdir = output_dir / ("run_" + wildcards.genotype.lower())
+
+        with local.cwd(output_dir):
+            busco['-i', assembly, '-o', wildcards.genotype, "-l", 
+                  config.busco_database, '-m', 'geno'] & FG
+        
+        for f in tmp_outdir.list():
+            f.move(output_dir)
+
+
 rule multiqc:
     input:
-        expand('output/contam_filter_fastqc1/{sample}.R1_fastqc.html', 
+        expand('output/contam_filter_fastqc{iter}/{sample}.R1_fastqc.html', 
                iter=ITERATIONS, sample=SAMPLE),
-        expand('output/contam_filter_fastqc1/{sample}.R2_fastqc.html', 
+        expand('output/contam_filter_fastqc{iter}/{sample}.R2_fastqc.html', 
                iter=ITERATIONS, sample=SAMPLE),
-        expand('output/contam_filter_fastqc1/{sample}.unpaired_fastqc.html', 
+        expand('output/contam_filter_fastqc{iter}/{sample}.unpaired_fastqc.html', 
                iter=ITERATIONS, sample=SAMPLE),
+        expand('output/quast{iter}/{genotype}/report.html', 
+               iter=ITERATIONS, genotype=GENOTYPE)
+        expand('output/busco{iter}/{genotype}/short_summary_busco.txt',
+               iter=ITERATIONS, genotype=GENOTYPE)
     output: 'output/multiqc/multiqc.html'
     shell:
         'multiqc -d -n {output} .'
