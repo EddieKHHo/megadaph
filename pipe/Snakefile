@@ -119,16 +119,18 @@ def match_assembly_index(wildcards):
 
 
 def get_exclusion_list(wildcards):
-    '''Given the genotype and decontamination iteration, return the list of 
-    contigs to exclude from the assembly'''
-    if wildcards.iter == 1:
-        exclusion_list = ''.join([
+    """Return the path of the exclusion list file"""
+    import pdb
+    pdb.set_trace()
+
+    if wildcards.iter == '1':
+        exclusions = ''.join([
             'output/find_contam_contigs1/', wildcards.genotype, '.txt'])
-    else if wildcards.iter == 2:
-        exclusion_list = ''.join([
+    elif wildcards.iter == '2':
+        exclusions = ''.join([
             'output/find_contam_contigs2/', wildcards.genotype,
             '_with_mitochondrial.txt'])
-    return exclusion_list
+    return exclusions
 
 
 def bowtie2_idx_root(idx):
@@ -144,14 +146,13 @@ def bowtie2_idx_root(idx):
 rule all:
     input:
         'output/multiqc/multiqc.html',
-        expand("output/produce_blobplots{iter}/{genotype}/family/{genotype}.bestsum"
-               ".family.p20.span.100.blobplot.cov0.png", genotype=GENOTYPE,
-               iter=ITERATIONS),
+        expand("output/produce_blobplots{iter}/{genotype}/family/{genotype}.bestsum.family.p20.span.100.blobplot.cov0.png", 
+               genotype=GENOTYPE, iter=ITERATIONS),
         expand("output/produce_covplots{iter}/{sample}.covsum.png",
                sample=SAMPLE, iter=ITERATIONS),
         ## TODO
         expand("output/filter_contamination{iter}/{sample}.R1.fastq.gz",
-               sample=SAMPLE, iter=[1:2])
+               sample=SAMPLE, iter=[1, 2])
 # }}}
 
 # ==============================================================================
@@ -471,8 +472,8 @@ rule add_mitochondrial_contigs_to_exclusions:
 # List the contigs which passed the filtering step
 rule generate_inclusion_list:
     input:
-        exclusions = get_exclusion_list
-        assembly = "output/assembly1/{genotype}SC.fasta"
+        exclusions = get_exclusion_list,
+        assembly = "output/assembly{iter}/{genotype}SC.fasta"
     output:
         "output/generate_inclusion_list{iter}/{genotype}.txt"
     shell:
@@ -565,7 +566,7 @@ rule quast:
         unpack(get_iterations_reads),
         assembly = 'output/assembly{iter}/{genotype}SC.fasta',
     output:
-        'output/quast{iter}/{genotype}/report.html
+        'output/quast{iter}/{genotype}/report.html'
     threads: 6
     params:
         outdir = "output/quast{iter}/{genotype}"
@@ -609,7 +610,7 @@ rule multiqc:
         expand('output/contam_filter_fastqc{iter}/{sample}.unpaired_fastqc.html', 
                iter=ITERATIONS, sample=SAMPLE),
         expand('output/quast{iter}/{genotype}/report.html', 
-               iter=ITERATIONS, genotype=GENOTYPE)
+               iter=ITERATIONS, genotype=GENOTYPE),
         expand('output/busco{iter}/{genotype}/short_summary_busco.txt',
                iter=ITERATIONS, genotype=GENOTYPE)
     output: 'output/multiqc/multiqc.html'
