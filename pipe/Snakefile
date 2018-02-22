@@ -117,7 +117,6 @@ def match_assembly_index(wildcards):
 
 def get_exclusion_list(wildcards):
     """Return the path of the exclusion list file"""
-
     if wildcards.iter == '1':
         exclusions = ''.join([
             'output/find_contam_contigs1/', wildcards.genotype, '.txt'])
@@ -480,8 +479,8 @@ rule generate_inclusion_list:
 rule filter_contamination:
     input:
         passing_contigs = lambda wildcards: ''.join([
-                                                     "output/generate_inclusion_list", wildcards.iter, "/",
-                                                     get_genotype_for_sample(wildcards), ".txt"]),
+            "output/generate_inclusion_list", wildcards.iter, "/",
+            get_genotype_for_sample(wildcards), ".txt"]),
         bam = "output/align_to_assembly{iter}/{sample}.bam"
     output:
         fwd = "output/filter_contamination{iter}/{sample}.R1.fastq.gz",
@@ -600,11 +599,11 @@ rule busco:
 rule multiqc:
     input:
         expand('output/contam_filter_fastqc{iter}/{sample}.R1_fastqc.html',
-               iter=ITERATIONS, sample=SAMPLE),
+               iter=[1, 2], sample=SAMPLE),
         expand('output/contam_filter_fastqc{iter}/{sample}.R2_fastqc.html',
-               iter=ITERATIONS, sample=SAMPLE),
+               iter=[1, 2], sample=SAMPLE),
         expand('output/contam_filter_fastqc{iter}/{sample}.unpaired_fastqc.htm'
-               'l', iter=ITERATIONS, sample=SAMPLE),
+               'l', iter=[1, 2], sample=SAMPLE),
         expand('output/quast{iter}/{genotype}/report.html',
                iter=ITERATIONS, genotype=GENOTYPE),
         expand('output/busco{iter}/{genotype}/short_summary_busco.txt',
