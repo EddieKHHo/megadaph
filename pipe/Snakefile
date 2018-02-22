@@ -66,7 +66,7 @@ def get_iterations_reads(wildcards):
         outdict['unpaired_reads'] = os.path.join(
             'output', 'filter_contamination' + prev_iter,
             smp + '.unpaired.fastq.gz'),
-        return outdict
+    return outdict
 
 
 def get_assembly_bams_from_genotype(wildcards):
@@ -348,10 +348,10 @@ rule convert_alignment_to_cov:
     input:
         bam = "output/align_to_assembly{iter}/{sample}.bam",
         assembly = lambda wildcards: ''.join([
-                                              "output/length_filter_assembly", wildcards.iter, '/',
-                                              get_genotype_for_sample(wildcards), 'SC.fasta'])
-        output:
-            "output/convert_alignment_to_cov{iter}/{sample}.bam.cov"
+            "output/length_filter_assembly", wildcards.iter, '/',
+            get_genotype_for_sample(wildcards), 'SC.fasta'])
+    output:
+        "output/convert_alignment_to_cov{iter}/{sample}.bam.cov"
     resources:
         mem_mb = 20000
     params:
@@ -384,9 +384,9 @@ rule init_blobtools_database:
               "--nodes {config[nodes_dmp]} --names {config[names_dmp]} "
               "-c " + cov_args + " > {log} 2>&1")
 
-        rule produce_blobplots:
-            input:
-                "output/init_blobtools_database{iter}/{genotype}.blobDB.json"
+rule produce_blobplots:
+    input:
+        "output/init_blobtools_database{iter}/{genotype}.blobDB.json"
     output:
         "output/produce_blobplots{iter}/{genotype}/family/{genotype}.bestsum.family.p20.span.100.blobplot.cov0.png",
         "output/produce_blobplots{iter}/{genotype}/genus/{genotype}.bestsum.genus.p20.span.100.blobplot.cov0.png",
@@ -408,8 +408,8 @@ rule produce_covplots:
                                         wildcards.iter, "/",
                                         get_genotype_for_sample(wildcards),
                                         ".blobDB.json"])
-        output:
-            "output/produce_covplots{iter}/{sample}.covsum.png"
+    output:
+        "output/produce_covplots{iter}/{sample}.covsum.png"
     params:
         output_prefix = "output/produce_covplots{iter}/{sample}",
         rank = "superkingdom",
@@ -609,7 +609,7 @@ rule multiqc:
                iter=ITERATIONS, genotype=GENOTYPE),
         expand('output/busco{iter}/{genotype}/short_summary_busco.txt',
                iter=ITERATIONS, genotype=GENOTYPE)
-        output: 'output/multiqc/multiqc.html'
+    output: 'output/multiqc/multiqc.html'
     shell:
         'multiqc -f -d -n {output} .'
 # }}}
