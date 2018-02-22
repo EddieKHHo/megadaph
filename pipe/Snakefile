@@ -254,7 +254,7 @@ rule assembly:
         output_dir = 'output/assembly{iter}/{genotype}SC_spades'
     threads: 8
     resources:
-        mem_mb = 50000
+        mem_mb = 80000
     shell:
         "python2 util/spades/bin/spades.py -1 {input.fwd_reads} -2 "
         "{input.rev_reads} -s {input.unpaired_reads} --threads {threads} "
@@ -614,5 +614,5 @@ rule multiqc:
                iter=ITERATIONS, genotype=GENOTYPE)
     output: 'output/multiqc/multiqc.html'
     shell:
-        'multiqc -d -n {output} .'
+        'multiqc -f -d -n {output} .'
 # }}}
