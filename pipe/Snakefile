@@ -446,13 +446,14 @@ rule find_mitochondrial_contigs:
         'output/assembly2/{genotype}SC.fasta'
     output:
         list = 'output/find_mitochondrial_contigs/{genotype}.txt',
-        blast = 'output/find_mitochondrial_contigs/{genotype}.xml'
+        blast = 'output/find_mitochondrial_contigs/{genotype}.tsv'
     run:
         # BLAST assembly vs. mtdna
-        shell('blastn -subject {input} -query {config.mitochondrial_reference} '
+        shell('blastn -subject {input} '
+              '-query {config[mitochondrial_reference]} '
               '-num_alignments 10 -outfmt 6 -evalue 1e-70 > {output.blast}')
         # Get the contig names
-        shell('cat {output.blast} | cut -f 2 > {output.list}')
+        shell('cat {output.blast} | cut -f 2 | uniq -d > {output.list}')
 
 rule add_mitochondrial_contigs_to_exclusions:
     input:
@@ -579,18 +580,19 @@ rule busco:
         'output/busco{iter}/{genotype}/short_summary_busco.txt'
     threads: 8
     run:
-        shell('export BUSCO_CONFIG_FILE={config.busco_config}')
-        shell('export AUGUSTUS_CONFIG_PATH={config.augustus_config}')
+        local.env['BUSCO_CONFIG_FILE'] = local.path(config['busco_config'])
+        local.env['AUGUSTUS_CONFIG_PATH'] = local.path(config['augustus_config'])
 
-        output_dir = local.path('output') / wildcards.genotype
+        output_dir = (local.path('output') / 
+            ('busco' + wildcards.iter) / wildcards.genotype)
         assembly = local.path(input)
-        lineage_file = local.path(params.busco_database)
+        lineage_file = local.path(config['busco_database'])
         busco = local['busco']
-        tmp_outdir = output_dir / ("run_" + wildcards.genotype.lower())
+        tmp_outdir = output_dir / ("run_" + wildcards.genotype)
 
         with local.cwd(output_dir):
             busco['-i', assembly, '-o', wildcards.genotype, "-l",
-                  config.busco_database, '-m', 'geno'] & FG
+                  lineage_file, '-m', 'geno', '-f'] & FG
 
             for f in tmp_outdir.list():
                 f.move(output_dir)
