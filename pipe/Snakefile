@@ -33,7 +33,7 @@ for genotype in GENOTYPE:
     GENOTYPE_SAMPLE[genotype] = [x for x in SAMPLE if x.startswith(genotype)]
 
 ITERATIONS = [1, 2, 3]
-FINAL_ITERATION = max(ITERATIONS)
+FINAL = max(ITERATIONS)
 # }}}}
 
 # ==============================================================================
@@ -107,6 +107,15 @@ def match_assembly(wildcards):
     return assembly
 
 
+def match_reduced_assembly(wilcards):
+    '''Given the sample, return the redundans reduced assembly'''
+    starting_control = get_starting_control(wildcards)
+    assembly = os.path.join("output",
+                            "redundans",
+                            starting_control + ".fasta")
+    return assembly
+
+
 def match_assembly_index(wildcards):
     """Given the sample, return the starting control assembly bowtie2 index"""
     starting_control = get_starting_control(wildcards)
@@ -145,9 +154,7 @@ rule all:
                genotype=GENOTYPE, iter=ITERATIONS),
         expand("output/produce_covplots{iter}/{sample}.covsum.png",
                sample=SAMPLE, iter=ITERATIONS),
-        # TODO
-        expand("output/filter_contamination{iter}/{sample}.R1.fastq.gz",
-               sample=SAMPLE, iter=[1, 2])
+        expand("output/call_variants/{sample}.g.vcf", sample=SAMPLE)
         # }}}
 
 # ==============================================================================
@@ -411,10 +418,18 @@ rule produce_covplots:
         "output/produce_covplots{iter}/{sample}.covsum.png"
     params:
         output_prefix = "output/produce_covplots{iter}/{sample}",
-        rank = "superkingdom",
-        exclude = ''
-    script:
-        "scripts/produce_covplots.py"
+        rank = "superkingdom"
+    run:
+        shell("blobtools covplot -p 20 -c {snakemake.input.cov} "
+              "-i {snakemake.input.db} -r {snakemake.params.rank} "
+              "-o {snakemake.params.output_prefix}")
+
+        outdir = local.path(snakemake.params.output_prefix).dirname
+        output_files = outdir.glob(snakemake.wildcards.sample + "*")
+        for f in output_files:
+            extensions = '.'.join(f.name.split(".")[-2:])
+            newname = outdir / (snakemake.wildcards.sample + "." + extensions)
+            f.move(newname)
 
 rule produce_blobtable:
     input:
@@ -510,6 +525,117 @@ rule filter_contamination:
 # }}}
 
 # ==============================================================================
+# Scaffolding
+# ==============================================================================
+# {{{
+
+rule redundans:
+    input:
+        fwd_reads = ('output/filter_contamination' + final +
+                     '/{genotype}SC.R1.fastq.gz'),
+        rev_reads = ('output/filter_contamination' + final +
+                     '/{genotype}SC.R2.fastq.gz'),
+        unpaired_reads = ('output/filter_contamination' + final +
+                          '/{genotype}SC.unpaired.fastq.gz'),
+        assembly = 'output/assembly' + FINAL + '/{genotype}SC.fasta'
+    output:
+        'output/redundans/{genotype}SC.fasta'
+    params:
+        outdir = 'output/redundans/{genotype}'
+    threads: 16
+    resources:
+        mem_mb = 80000
+    log:
+        'output/redundans/log/{genotype}.log'
+    shell:
+        'rm -rf {params.outdir} && '
+        'python2 {config[redundans_bin]} -v -f {input.assembly} '
+        '-i {input.fwd_reads} {input.rev_reads} -l {input.unpaired_reads} '
+        '-r {config[nuclear_reference]} -t {threads} 2> {log} && '
+        'mv {params.outdir}/scaffolds.reduced.fa '
+        'output/redundans/{wildcards.genotype}SC.fasta'
+
+# }}}
+
+# ==============================================================================
+# Variant Calling Pre-Processing
+# ==============================================================================
+# {{{
+rule align_to_reduced_assembly:
+    input:
+        fwd_reads = ('output/filter_contamination' + final +
+                     '/{sample}.R1.fastq.gz'),
+        rev_reads = ('output/filter_contamination' + final +
+                     '/{sample}.R2.fastq.gz'),
+        unpaired_reads = ('output/filter_contamination' + final +
+                          '/{sample}.unpaired.fastq.gz'),
+        assembly = match_reduced_assembly
+    output:
+        bam = 'output/align_to_reduced_assembly/{sample}.bam',
+        bai = 'output/align_to_reduced_assembly/{sample}.bam.bai'
+    threads: 12
+    resources:
+        mem_mb = 20000
+    log:
+        "output/align_to_reduced_assembly/log/{sample}.log"
+    run:
+        index_prefix = bowtie2_idx_root(input.index)
+        shell("bowtie2 -1 {input.fwd_reads} -2 {input.rev_reads} "
+              "-U {input.unpaired_reads} -X 1000 -x " + index_prefix +
+              "--rg-id={wildcards.sample} --rg=LIB:{wildcards.sample} "
+              "--rg=PL:illumina --rg=SM:{wildcards.sample} -p {threads} | "
+              "samtools view -bh - | "
+              "samtools sort - > {output.bam} 2> {log}")
+        shell("samtools index {output.bam}")
+
+rule mark_duplicates:
+    input:
+        'output/align_to_reduced_assembly/{sample}.bam'
+    output:
+        temp('output/mark_duplicates/{sample}.bam')
+    resources:
+        mem_mb = 20000
+    log:
+        'output/mark_duplicates/log/{sample}.log'
+    shell:
+        'picard MarkDuplicates I={input} O={output} REMOVE_DUPLICATES=True '
+        'M={log}'
+
+rule recalibrate_base_quality:
+    input:
+        bam = 'output/mark_duplicates/{sample}.bam',
+        assembly = match_reduced_assembly
+    output:
+        table = 'output/recalibrate_base_quality/{sample}.table',
+        bam = 'output/recalibrate_base_quality/{sample}.bam'
+    threads: 8
+    resources:
+        mem_mb = 20000
+    log:
+        'output/recalibrate_base_quality/log/{sample}.log'
+    shell:
+        'gatk -T BaseRecalibrator -nct {threads} -o {output.table} '
+        '-I {input.bam} 2> {log} && '
+        'gatk -T PrintReads -R {input.assembly} -I {input.bam} '
+        '-BQSR {output.table}'
+
+rule call_variants:
+    input:
+        bam = 'output/recalibrate_base_quality/{sample}.bam',
+        assembly = match_reduced_assembly
+    output:
+        'output/call_variants/{sample}.g.vcf'
+    resources:
+        mem_mb = 20000
+    log:
+        'output/call_variants/{sample}.log'
+    shell:
+        'gatk -R {input.assembly} -T HaplotypeCaller -I {input.bam} '
+        '--emitRefConfidence GVCF -o {output}'
+
+# }}}
+
+# ==============================================================================
 # Summarize Pipeline
 # ==============================================================================
 # {{{
@@ -581,9 +707,10 @@ rule busco:
     threads: 8
     run:
         local.env['BUSCO_CONFIG_FILE'] = local.path(config['busco_config'])
-        local.env['AUGUSTUS_CONFIG_PATH'] = local.path(config['augustus_config'])
+        local.env['AUGUSTUS_CONFIG_PATH'] = local.path(
+            config['augustus_config'])
 
-        output_dir = (local.path('output') / 
+        output_dir = (local.path('output') /
             ('busco' + wildcards.iter) / wildcards.genotype)
         assembly = local.path(input)
         lineage_file = local.path(config['busco_database'])
