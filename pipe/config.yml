@@ -6,3 +6,9 @@ adapters: input/adapters/adapters_illumina.fa
 blast_database: input/blastdb/nt
 nodes_dmp: input/taxonomy/nodes.dmp
 names_dmp: input/taxonomy/names.dmp
+redundans_bin: lib/redundans/redundans.py 
+busco_database: input/buscodb/arthropoda_odb9
+busco_config: config/busco/config.ini
+augustus_config: /mnt/lfs2/schaack/.linuxbrew/Cellar/augustus/3.3/config
+mitochondrial_reference: input/ref/magna.mt.europe.fa
+nuclear_reference: input/ref/magna.nuc.fa
