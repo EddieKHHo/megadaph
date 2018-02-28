@@ -466,18 +466,18 @@ rule find_mitochondrial_contigs:
         # BLAST assembly vs. mtdna
         shell('blastn -subject {input} '
               '-query {config[mitochondrial_reference]} '
-              '-num_alignments 10 -outfmt 6 -evalue 1e-70 > {output.blast}')
+              '-num_alignments 10 -outfmt 6 > {output.blast}')
         # Get the contig names
         shell('cat {output.blast} | cut -f 2 | uniq -d > {output.list}')
 
-rule add_mitochondrial_contigs_to_exclusions:
-    input:
-        mito = 'output/find_mitochondrial_contigs/{genotype}.txt',
-        other_contam = 'output/find_contam_contigs2/{genotype}.txt'
-    output:
-        'output/find_contam_contigs2/{genotype}_with_mitochondrial.txt'
-    shell:
-        'cat {input.mito} {input.other_contam} > {output}'
+# rule add_mitochondrial_contigs_to_exclusions:
+#     input:
+#         mito = 'output/find_mitochondrial_contigs/{genotype}.txt',
+#         other_contam = 'output/find_contam_contigs2/{genotype}.txt'
+#     output:
+#         'output/find_contam_contigs2/{genotype}_with_mitochondrial.txt'
+#     shell:
+#         'cat {input.mito} {input.other_contam} > {output}'
 
 
 # List the contigs which passed the filtering step
@@ -525,7 +525,7 @@ rule filter_contamination:
 # }}}
 
 # ==============================================================================
-# Scaffolding
+# Reduction/Scaffolding
 # ==============================================================================
 # {{{
 
@@ -554,7 +554,6 @@ rule redundans:
         '-r {config[nuclear_reference]} -t {threads} 2> {log} && '
         'mv {params.outdir}/scaffolds.reduced.fa '
         'output/redundans/{wildcards.genotype}SC.fasta'
-
 # }}}
 
 # ==============================================================================
@@ -662,7 +661,7 @@ rule clean_fastqc:
         'output/clean_fastqc/{sample}.R2_fastqc.html',
         'output/clean_fastqc/{sample}.merged_fastqc.html'
     params:
-        outdir='output/clean_fastqc'
+        outdir = 'output/clean_fastqc'
     shell:
         "fastqc -o {params.outdir} {input.fwd_reads} {input.rev_reads} "
         "{input.merged_reads}"
@@ -671,8 +670,8 @@ rule contam_filter_fastqc:
     input:
         fwd_reads = 'output/filter_contamination{iter}/{sample}.R1.fastq.gz',
         rev_reads = 'output/filter_contamination{iter}/{sample}.R2.fastq.gz',
-        unpaired_reads = 'output/filter_contamination{iter}/{sample}.unpaired' +
-            '.fastq.gz'
+        unpaired_reads = (
+            'output/filter_contamination{iter}/{sample}.unpaired' + '.fastq.gz')
     output:
         'output/contam_filter_fastqc{iter}/{sample}.R1_fastqc.html',
         'output/contam_filter_fastqc{iter}/{sample}.R2_fastqc.html',
@@ -698,32 +697,17 @@ rule quast:
         "quast.py -o {params.outdir} --eukaryote -1 {input.fwd_reads} "
         "-2 {input.rev_reads} -t {threads} --no-snps {input.assembly}"
 
-
 rule busco:
-    input:
-        'output/assembly{iter}/{genotype}SC.fasta'
-    output:
-        'output/busco{iter}/{genotype}/short_summary_busco.txt'
+    input: 'output/assembly{iter}/{genotype}SC.fasta'
+    output: 'output/busco{iter}/{genotype}/short_summary_busco.txt'
     threads: 8
-    run:
-        local.env['BUSCO_CONFIG_FILE'] = local.path(config['busco_config'])
-        local.env['AUGUSTUS_CONFIG_PATH'] = local.path(
-            config['augustus_config'])
+    script: 'busco.py'
 
-        output_dir = (local.path('output') /
-            ('busco' + wildcards.iter) / wildcards.genotype)
-        assembly = local.path(input)
-        lineage_file = local.path(config['busco_database'])
-        busco = local['busco']
-        tmp_outdir = output_dir / ("run_" + wildcards.genotype)
-
-        with local.cwd(output_dir):
-            busco['-i', assembly, '-o', wildcards.genotype, "-l",
-                  lineage_file, '-m', 'geno', '-f'] & FG
-
-            for f in tmp_outdir.list():
-                f.move(output_dir)
-
+rule busco_reduced_assembly:
+    input: 'output/redundans/{genotype}SC.fasta'
+    output: 'output/busco_reduced_assembly/{genotype}/short_summary_busco.txt'
+    threads: 8
+    script: 'busco.py'
 
 rule multiqc:
     input:
@@ -731,12 +715,15 @@ rule multiqc:
                iter=[1, 2], sample=SAMPLE),
         expand('output/contam_filter_fastqc{iter}/{sample}.R2_fastqc.html',
                iter=[1, 2], sample=SAMPLE),
-        expand('output/contam_filter_fastqc{iter}/{sample}.unpaired_fastqc.htm'
+        expand('output/contam_filter_fastqc{iter}/{sample}.unpaired_fastqc.html'
                'l', iter=[1, 2], sample=SAMPLE),
         expand('output/quast{iter}/{genotype}/report.html',
                iter=ITERATIONS, genotype=GENOTYPE),
+        expand('output/quast_')
         expand('output/busco{iter}/{genotype}/short_summary_busco.txt',
                iter=ITERATIONS, genotype=GENOTYPE)
+        expand('output/busco_reduced_assembly/{genotype}/short_summary_busco.txt',
+               genotype=GENOTYPE)
     output: 'output/multiqc/multiqc.html'
     shell:
         'multiqc -f -d -n {output} .'
