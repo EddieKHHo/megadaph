@@ -127,7 +127,7 @@ def match_reduced_assembly(wildcards):
     '''Given the sample, return the redundans reduced assembly'''
     starting_control = get_starting_control(wildcards)
     assembly = os.path.join("output",
-                            "redundans",
+                            "length_filter_reduced_assembly",
                             starting_control + ".fasta")
     return assembly
 
@@ -139,11 +139,12 @@ def match_assembly_index(wildcards):
                         "length_filter_assembly" + wildcards.iter,
                         starting_control + ".1.bt2")
 
+
 def match_reduced_assembly_index(wildcards):
     """Given the sample, return the redundans reduced ssembly bowtie2 index"""
     starting_control = get_starting_control(wildcards)
     return os.path.join("output",
-                        "redundans",
+                        "length_filter_reduced_assembly",
                         starting_control + ".1.bt2")
 
 
@@ -177,7 +178,9 @@ rule all:
                genotype=GENOTYPE, iter=ITERATIONS),
         expand("output/produce_covplots{iter}/{sample}.covsum.png",
                sample=SAMPLE, iter=ITERATIONS),
-        expand("output/call_variants/{sample}.g.vcf", sample=SAMPLE)
+        expand("output/call_variants/{sample}.g.vcf", sample=SAMPLE),
+        expand('output/blast_against_mitochondria/{genotype}.tsv',
+               genotype=GENOTYPE)
         # }}}
 
 # ==============================================================================
@@ -475,41 +478,7 @@ rule find_contam_contigs:
     shell:
         '{params.find_contam_contigs} {input} > {output}'
 
-# List the mitochondrial contigs in the assembly
-# This was left out of the first round of decontamination, if assemblies need
-# to be started from scratch in the future, this should be altered to operate
-# on assembly1
-<<<<<<< HEAD
-rule find_mitochondrial_contigs:
-    input:
-        'output/assembly2/{genotype}SC.fasta'
-    output:
-        list = 'output/find_mitochondrial_contigs/{genotype}.txt',
-        blast = 'output/find_mitochondrial_contigs/{genotype}.tsv'
-    run:
-        # BLAST assembly vs. mtdna
-        shell('blastn -subject {input} '
-              '-query {config[mitochondrial_reference]} '
-              '-num_alignments 10 -outfmt 6 > {output.blast}')
-        # Get the contig names
-        shell('cat {output.blast} | cut -f 2 | uniq -d > {output.list}')
-
-=======
-# rule find_mitochondrial_contigs:
-#     input:
-#         'output/assembly2/{genotype}SC.fasta'
-#     output:
-#         list = 'output/find_mitochondrial_contigs/{genotype}.txt',
-#         blast = 'output/find_mitochondrial_contigs/{genotype}.tsv'
-#     run:
-#         # BLAST assembly vs. mtdna
-#         shell('blastn -subject {input} '
-#               '-query {config[mitochondrial_reference]} '
-#               '-num_alignments 10 -outfmt 6 -evalue 1e-60 > {output.blast}')
-#         # Get the contig names
-#         shell('cat {output.blast} | cut -f 2 | uniq -d > {output.list}')
 # 
->>>>>>> 1e3ec670259765144ae76b26d70ebfc2187f4932
 # rule add_mitochondrial_contigs_to_exclusions:
 #     input:
 #         mito = 'output/find_mitochondrial_contigs/{genotype}.txt',
@@ -591,6 +560,30 @@ rule redundans:
               '2> {log}')
         shell('mv {params.outdir}/scaffolds.reduced.fa {output}')
         shell('samtools faidx {output}')
+
+rule length_filter_reduced_assembly:
+    input:
+        'output/redundans/{genotype}SC.fasta'
+    output:
+        'output/length_filter_reduced_assembly/{genotype}SC.fasta'
+    params:
+        minlen = "1000"
+    shell: 
+        "length_filter_fasta.pl {params.minlen} {input} > {output}"
+
+rule blast_against_mitochondria:
+    input:
+        'output/length_filter_reduced_assembly/{genotype}SC.fasta'
+    output:
+        list = 'output/blast_against_mitochondria/{genotype}.txt',
+        blast = 'output/blast_against_mitochondria/{genotype}.tsv'
+    run:
+        # BLAST assembly vs. mtdna
+        shell('blastn -subject {input} '
+              '-query {config[mitochondrial_reference]} '
+              '-num_alignments 10 -outfmt 6 > {output.blast}')
+        # Get the contig names
+        shell('cat {output.blast} | cut -f 2 | uniq -d > {output.list}')
 # }}}
 
 # ==============================================================================
@@ -599,12 +592,12 @@ rule redundans:
 # {{{
 rule index_reduced_assembly:
     input:
-        'output/redundans/{genotype}SC.fasta'
+        'output/length_filter_reduced_assembly/{genotype}SC.fasta'
     output:
-        bt2 = 'output/redundans/{genotype}SC.1.bt2',
-        picard = 'output/redundans/{genotype}SC.dict'
+        bt2 = 'output/length_filter_reduced_assembly/{genotype}SC.1.bt2',
+        picard = 'output/length_filter_reduced_assembly/{genotype}SC.dict'
     params:
-        output_prefix = "output/redundans/{genotype}SC"
+        output_prefix = "output/length_filter_reduced_assembly/{genotype}SC"
     shell:
         "bowtie2-build {input} {params.output_prefix} && "
         "picard CreateSequenceDictionary R={input} O={output.picard}"
@@ -755,7 +748,7 @@ rule busco:
 rule quast_reduced_assembly:
     input:
         unpack(get_clean_reads),
-        assembly = 'output/redundans/{genotype}SC.fasta',
+        assembly = 'output/length_filter_reduced_assembly/{genotype}SC.fasta',
     output:
         'output/quast_reduced_assembly/{genotype}/report.html'
     threads: 6
@@ -768,7 +761,7 @@ rule quast_reduced_assembly:
         "-2 {input.rev_reads} -t {threads} --no-snps {input.assembly}"
 
 rule busco_reduced_assembly:
-    input: 'output/redundans/{genotype}SC.fasta'
+    input: 'output/length_filter_reduced_assembly/{genotype}SC.fasta'
     output: 'output/busco_reduced_assembly/{genotype}/short_summary_busco.txt'
     threads: 8
     script: 'busco.py'
