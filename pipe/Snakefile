@@ -75,7 +75,7 @@ def get_clean_reads(wildcards):
         smp = wildcards.sample
     except AttributeError:
         smp = wildcards.genotype + 'SC'
-    final_iter = str(max(ITERATIONS))
+    final_iter = str(ITERATIONS[-2])
     outdict['fwd_reads'] = os.path.join(
         'output', 'filter_contamination' + final_iter, smp + '.R1.fastq.gz'),
     outdict['rev_reads'] = os.path.join(
@@ -179,6 +179,8 @@ rule all:
                genotype=GENOTYPE, iter=ITERATIONS),
         expand("output/produce_covplots{iter}/{sample}.covsum.png",
                sample=SAMPLE, iter=ITERATIONS),
+        expand("output/find_contam_contigs{iter}/{genotype}.txt", iter=[1,2],
+               genotype=GENOTYPE),
         expand("output/call_variants/{sample}.g.vcf", sample=SAMPLE),
         expand('output/blast_against_mitochondria/{genotype}.tsv',
                genotype=GENOTYPE)
@@ -514,7 +516,7 @@ rule filter_contamination:
         unpaired = "output/filter_contamination{iter}/{sample}.unpaired.fastq.gz"
     threads: 16
     resources:
-        mem_mb = 40000
+        mem_mb = 60000
     params:
         output_prefix = "output/filter_contamination{iter}/{sample}"
     log:
@@ -549,7 +551,7 @@ rule redundans:
         outdir = 'output/redundans/{genotype}'
     threads: 16
     resources:
-        mem_mb = 80000
+        mem_mb = 100000
     log:
         'output/redundans/log/{genotype}.log'
     run:
@@ -596,11 +598,13 @@ rule index_reduced_assembly:
         'output/length_filter_reduced_assembly/{genotype}SC.fasta'
     output:
         bt2 = 'output/length_filter_reduced_assembly/{genotype}SC.1.bt2',
-        picard = 'output/length_filter_reduced_assembly/{genotype}SC.dict'
+        picard = 'output/length_filter_reduced_assembly/{genotype}SC.dict',
+        fai = 'output/length_filter_assembly1/{genotype}SC.fasta.fai'
     params:
         output_prefix = "output/length_filter_reduced_assembly/{genotype}SC"
     shell:
         "bowtie2-build {input} {params.output_prefix} && "
+        "samtools index {input} && "
         "picard CreateSequenceDictionary R={input} O={output.picard}"
 
 rule align_to_reduced_assembly:
@@ -672,8 +676,8 @@ rule call_variants:
     log:
         'output/call_variants/{sample}.log'
     shell:
-        'gatk -R {input.assembly} -T HaplotypeCaller -I {input.bam} '
-        '--emitRefConfidence GVCF -o {output}'
+        'gatk HaplotypeCaller -R {input.assembly} -I {input.bam} '
+        '--emit-ref-confidence GVCF -O {output}'
 
 # }}}
 
@@ -742,9 +746,11 @@ rule quast:
 
 rule busco:
     input: 'output/assembly{iter}/{genotype}SC.fasta'
-    output: 'output/busco{iter}/{genotype}/short_summary_busco.txt'
+    output: 'output/busco{iter}/{genotype}/short_summary_{genotype}.txt'
     threads: 8
-    script: 'busco.py'
+    params:
+        outdir = 'output/busco{iter}/{genotype}'
+    script: 'scripts/busco.py'
 
 rule quast_reduced_assembly:
     input:
@@ -763,23 +769,25 @@ rule quast_reduced_assembly:
 
 rule busco_reduced_assembly:
     input: 'output/length_filter_reduced_assembly/{genotype}SC.fasta'
-    output: 'output/busco_reduced_assembly/{genotype}/short_summary_busco.txt'
+    output: 'output/reduced_assembly_busco/{genotype}/short_summary_{genotype}.txt'
     threads: 8
-    script: 'busco.py'
+    params:
+        outdir = 'output/reduced_assembly_busco/{genotype}'
+    script: 'scripts/busco.py'
 
 rule multiqc:
     input:
         expand('output/contam_filter_fastqc{iter}/{sample}.R1_fastqc.html',
-               iter=ITERATIONS, sample=SAMPLE),
+               iter=[1, 2], sample=SAMPLE),
         expand('output/contam_filter_fastqc{iter}/{sample}.R2_fastqc.html',
-               iter=ITERATIONS, sample=SAMPLE),
-        expand('output/contam_filter_fastqc{iter}/{sample}.unpaired_fastqc.html'
-               'l', iter=ITERATIONS, sample=SAMPLE),
+               iter=[1, 2], sample=SAMPLE),
+        expand('output/contam_filter_fastqc{iter}/{sample}.unpaired_fastqc.html',
+               iter=[1, 2], sample=SAMPLE),
         expand('output/quast{iter}/{genotype}/report.html',
                iter=ITERATIONS, genotype=GENOTYPE),
-        expand('output/busco{iter}/{genotype}/short_summary_busco.txt',
+        expand('output/busco{iter}/{genotype}/short_summary_{genotype}.txt',
                iter=ITERATIONS, genotype=GENOTYPE),
-        expand('output/busco_reduced_assembly/{genotype}/short_summary_busco.txt',
+        expand('output/reduced_assembly_busco/{genotype}/short_summary_{genotype}.txt',
                genotype=GENOTYPE),
         expand('output/quast_reduced_assembly/{genotype}/report.html',
                genotype=GENOTYPE)
