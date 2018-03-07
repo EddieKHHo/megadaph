@@ -51,15 +51,25 @@ def assembly(tempdir):
 
 
 def test_filter_mitochondrial_scaffolds(blast_tsv, assembly, tempdir):
-    outfile = tempdir / (uuid4().hex + '.fa')
+    outfasta = tempdir / (uuid4().hex + '.fa')
+    outtxt = tempdir / (uuid4().hex + '.txt')
     runner = CliRunner()
     runner.invoke(main, ['--blast', str(blast_tsv['file']),
                          '--assembly', str(assembly),
-                         '--outfile', str(outfile)])
-    output_scaffolds = capture_stdout(list_csomes[outfile])
+                         '--outfasta', str(outfasta),
+                         '--outtxt', str(outtxt)])
+    output_scaffolds = capture_stdout(list_csomes[outfasta])
+
+    with outtxt.open('r') as f:
+        filtered_scaffolds = f.readlines()
+        filtered_scaffolds = [x.rstrip() for x in filtered_scaffolds]
+
     for seqid in ['NOT_MT1', 'NOT_MT2', 'NUMT']:
         assert seqid in output_scaffolds
+        assert seqid not in filtered_scaffolds
     if 'MT' in blast_tsv['params'].keys():
         assert 'MT' not in output_scaffolds
+        assert 'MT' in filtered_scaffolds
     else:
         assert 'MT' in output_scaffolds
+        assert 'MT' not in filtered_scaffolds
