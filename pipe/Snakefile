@@ -32,7 +32,8 @@ GENOTYPE_SAMPLE = {}
 for genotype in GENOTYPE:
     GENOTYPE_SAMPLE[genotype] = [x for x in SAMPLE if x.startswith(genotype)]
 
-ITERATIONS = [1, 2, 3]
+ALL_ITER = ['1', '2', '3', '_reduced']
+DECONTAM_ITER = ['1', '2']
 # }}}}
 
 # ==============================================================================
@@ -49,41 +50,28 @@ def get_iterations_reads(wildcards):
         smp = wildcards.genotype + 'SC'
 
     outdict = {}
-    if int(wildcards.iter) == 1:
-        outdict['fwd_reads'] = os.path.join('output', 'quality_trim',
-                                            smp + '.R1.fastq.gz'),
-        outdict['rev_reads'] = os.path.join('output', 'quality_trim',
-                                            smp + '.R2.fastq.gz'),
-        outdict['unpaired_reads'] = os.path.join('output', 'quality_trim',
-                                                 smp + '.merged.fastq.gz'),
+    if wildcards.iter == '_reduced':
+        final_iter = DECONTAM_ITER[-1]
+        read_dir = os.path.join('output', 'filter_contamination' + final_iter)
+        outdict['fwd_reads'] = os.path.join(read_dir, smp + '.R1.fastq.gz')
+        outdict['rev_reads'] = os.path.join(read_dir, smp + '.R2.fastq.gz')
+        outdict['unpaired_reads'] = os.path.join(read_dir,
+                                                 smp + '.unpaired.fastq.gz')
+    elif int(wildcards.iter) == 1:
+        read_dir = os.path.join('output', 'quality_trim')
+        outdict['fwd_reads'] = os.path.join(read_dir, smp + '.R1.fastq.gz')
+        outdict['rev_reads'] = os.path.join(read_dir, smp + '.R2.fastq.gz')
+        outdict['unpaired_reads'] = os.path.join(read_dir, smp +
+                                                 '.merged.fastq.gz')
     else:
         prev_iter = str(int(wildcards.iter) - 1)
-        outdict['fwd_reads'] = os.path.join(
-            'output', 'filter_contamination' + prev_iter, smp + '.R1.fastq.gz'),
-        outdict['rev_reads'] = os.path.join(
-            'output', 'filter_contamination' + prev_iter, smp + '.R2.fastq.gz'),
-        outdict['unpaired_reads'] = os.path.join(
-            'output', 'filter_contamination' + prev_iter,
-            smp + '.unpaired.fastq.gz'),
+        read_dir = os.path.join('output', 'filter_contamination' + prev_iter)
+        outdict['fwd_reads'] = os.path.join(read_dir, smp + '.R1.fastq.gz')
+        outdict['rev_reads'] = os.path.join(read_dir, smp + '.R2.fastq.gz')
+        outdict['unpaired_reads'] = os.path.join(read_dir, smp +
+                                                 '.unpaired.fastq.gz')
     return outdict
 
-
-def get_clean_reads(wildcards):
-    """Get the final set of reads which passed decontamination"""
-    outdict = {}
-    try:
-        smp = wildcards.sample
-    except AttributeError:
-        smp = wildcards.genotype + 'SC'
-    final_iter = str(ITERATIONS[-2])
-    outdict['fwd_reads'] = os.path.join(
-        'output', 'filter_contamination' + final_iter, smp + '.R1.fastq.gz'),
-    outdict['rev_reads'] = os.path.join(
-        'output', 'filter_contamination' + final_iter, smp + '.R2.fastq.gz'),
-    outdict['unpaired_reads'] = os.path.join(
-        'output', 'filter_contamination' + final_iter,
-        smp + '.unpaired.fastq.gz'),
-    return outdict
 
 def get_assembly_bams_from_genotype(wildcards):
     sample_names = get_samples_for_genotype(wildcards)
@@ -127,7 +115,7 @@ def match_reduced_assembly(wildcards):
     '''Given the sample, return the redundans reduced assembly'''
     starting_control = get_starting_control(wildcards)
     assembly = os.path.join("output",
-                            "length_filter_reduced_assembly",
+                            "filter_mitochondrial_scaffolds",
                             starting_control + ".fasta")
     return assembly
 
@@ -144,21 +132,9 @@ def match_reduced_assembly_index(wildcards):
     """Given the sample, return the redundans reduced ssembly bowtie2 index"""
     starting_control = get_starting_control(wildcards)
     index = os.path.join("output",
-                        "length_filter_reduced_assembly",
-                        starting_control + ".1.bt2")
+                         "filter_mitochondrial_scaffolds",
+                         starting_control + ".1.bt2")
     return index
-
-
-#def get_exclusion_list(wildcards):
-#    """Return the path of the exclusion list file"""
-#    if wildcards.iter == '1':
-#        exclusions = ''.join([
-#            'output/find_contam_contigs1/', wildcards.genotype, '.txt'])
-#    elif wildcards.iter == '2':
-#        exclusions = ''.join([
-#            'output/find_contam_contigs2/', wildcards.genotype,
-#            '_with_mitochondrial.txt'])
-#    return exclusions
 
 
 def bowtie2_idx_root(idx):
@@ -176,11 +152,11 @@ rule all:
         'output/multiqc/multiqc.html',
         expand("output/produce_blobplots{iter}/{genotype}/family/{genotype}."
                "bestsum.family.p20.span.100.blobplot.cov0.png",
-               genotype=GENOTYPE, iter=ITERATIONS),
+               genotype=GENOTYPE, iter=ALL_ITER),
         expand("output/produce_covplots{iter}/{sample}.covsum.png",
-               sample=SAMPLE, iter=ITERATIONS),
-        expand("output/find_contam_contigs{iter}/{genotype}.txt", iter=[1,2],
-               genotype=GENOTYPE),
+               sample=SAMPLE, iter=ALL_ITER),
+        expand("output/find_contam_contigs{iter}/{genotype}.txt",
+               iter=DECONTAM_ITER, genotype=GENOTYPE),
         expand("output/call_variants/{sample}.g.vcf", sample=SAMPLE),
         expand('output/blast_against_mitochondria/{genotype}.tsv',
                genotype=GENOTYPE)
@@ -299,7 +275,8 @@ rule length_filter_assembly:
     output:
         'output/length_filter_assembly{iter}/{genotype}SC.fasta'
     params:
-        minlen = "200"
+        minlen = lambda wildcards: (
+            "1000" if wildcards.iter == "_reduced" else "200")
     shell: "length_filter_fasta.pl {params.minlen} {input} > {output}"
 
 rule bowtie2_index_assembly:
@@ -401,7 +378,8 @@ rule init_blobtools_database:
     input:
         assembly = "output/length_filter_assembly{iter}/{genotype}SC.fasta",
         blast_hits = "output/blast_assembly{iter}/{genotype}SC.tsv",
-        diamond_hits = "output/diamond_blast_assembly{iter}/{genotype}SC.taxified.out",
+        diamond_hits = ('output/diamond_blast_assembly{iter}/{genotype}SC.'
+                        'taxified.out'),
         covs = get_assembly_covfiles_from_genotype
     output:
         "output/init_blobtools_database{iter}/{genotype}.blobDB.json"
@@ -423,11 +401,16 @@ rule produce_blobplots:
     input:
         "output/init_blobtools_database{iter}/{genotype}.blobDB.json"
     output:
-        "output/produce_blobplots{iter}/{genotype}/family/{genotype}.bestsum.family.p20.span.100.blobplot.cov0.png",
-        "output/produce_blobplots{iter}/{genotype}/genus/{genotype}.bestsum.genus.p20.span.100.blobplot.cov0.png",
-        "output/produce_blobplots{iter}/{genotype}/order/{genotype}.bestsum.order.p20.span.100.blobplot.cov0.png",
-        "output/produce_blobplots{iter}/{genotype}/phylum/{genotype}.bestsum.phylum.p20.span.100.blobplot.cov0.png",
-        "output/produce_blobplots{iter}/{genotype}/species/{genotype}.bestsum.species.p20.span.100.blobplot.cov0.png"
+        ('output/produce_blobplots{iter}/{genotype}/family/{genotype}.bestsum.'
+         'family.p20.span.100.blobplot.cov0.png'),
+        ('output/produce_blobplots{iter}/{genotype}/genus/{genotype}.bestsum.'
+         'genus.p20.span.100.blobplot.cov0.png'),
+        ('output/produce_blobplots{iter}/{genotype}/order/{genotype}.bestsum.'
+         'order.p20.span.100.blobplot.cov0.png'),
+        ('output/produce_blobplots{iter}/{genotype}/phylum/{genotype}.bestsum.'
+         'phylum.p20.span.100.blobplot.cov0.png'),
+        ('output/produce_blobplots{iter}/{genotype}/species/{genotype}.bestsum.'
+         'species.p20.span.100.blobplot.cov0.png')
     threads: 5
     resources:
         mem_mb = 40000
@@ -543,7 +526,10 @@ rule filter_contamination:
 
 rule redundans:
     input:
-        unpack(get_clean_reads),
+        fwd_reads = 'output/filter_contamination2/{genotype}SC.R1.fastq.gz',
+        rev_reads = 'output/filter_contamination2/{genotype}SC.R2.fastq.gz',
+        unpaired_reads = (
+            'output/filter_contamination2/{genotype}SC.unpaired.fastq.gz'),
         assembly = 'output/assembly3/{genotype}SC.fasta'
     output:
         'output/redundans/{genotype}SC.fasta'
@@ -564,19 +550,9 @@ rule redundans:
         shell('mv {params.outdir}/scaffolds.reduced.fa {output}')
         shell('samtools faidx {output}')
 
-rule length_filter_reduced_assembly:
-    input:
-        'output/redundans/{genotype}SC.fasta'
-    output:
-        'output/length_filter_reduced_assembly/{genotype}SC.fasta'
-    params:
-        minlen = "1000"
-    shell: 
-        "length_filter_fasta.pl {params.minlen} {input} > {output}"
-
 rule blast_against_mitochondria:
     input:
-        'output/length_filter_reduced_assembly/{genotype}SC.fasta'
+        'output/length_filter_assembly_reduced/{genotype}SC.fasta'
     output:
         list = 'output/blast_against_mitochondria/{genotype}.txt',
         blast = 'output/blast_against_mitochondria/{genotype}.tsv'
@@ -587,6 +563,16 @@ rule blast_against_mitochondria:
               '-num_alignments 10 -outfmt 6 > {output.blast}')
         # Get the contig names
         shell('cat {output.blast} | cut -f 2 | uniq -d > {output.list}')
+
+rule filter_mitochondrial_scaffolds:
+    input:
+        blast = 'output/blast_against_mitochondria/{genotype}.tsv',
+        assembly = 'output/length_filter_assembly_reduced/{genotype}SC.fasta'
+    output:
+        'output/filter_mitochondrial_scaffolds/{genotype}SC.fasta'
+    shell:
+        'scripts/filter_mitochondrial_scaffolds.py --blast {input.blast} '
+        '--assembly {input.assembly} --outfile {output} && '
 # }}}
 
 # ==============================================================================
@@ -595,13 +581,13 @@ rule blast_against_mitochondria:
 # {{{
 rule index_reduced_assembly:
     input:
-        'output/length_filter_reduced_assembly/{genotype}SC.fasta'
+        'output/filter_mitochondrial_scaffolds/{genotype}SC.fasta'
     output:
-        bt2 = 'output/length_filter_reduced_assembly/{genotype}SC.1.bt2',
-        picard = 'output/length_filter_reduced_assembly/{genotype}SC.dict',
-        fai = 'output/length_filter_assembly1/{genotype}SC.fasta.fai'
+        bt2 = 'output/filter_mitochondrial_scaffolds/{genotype}SC.1.bt2',
+        picard = 'output/filter_mitochondrial_scaffolds/{genotype}SC.dict',
+        fai = 'output/filter_mitochondrial_scaffolds/{genotype}SC.fasta.fai'
     params:
-        output_prefix = "output/length_filter_reduced_assembly/{genotype}SC"
+        output_prefix = "output/filter_mitochondrial_scaffolds/{genotype}SC"
     shell:
         "bowtie2-build {input} {params.output_prefix} && "
         "samtools index {input} && "
@@ -609,7 +595,10 @@ rule index_reduced_assembly:
 
 rule align_to_reduced_assembly:
     input:
-        unpack(get_clean_reads),
+        fwd_reads = 'output/filter_contamination2/{genotype}SC.R1.fastq.gz',
+        rev_reads = 'output/filter_contamination2/{genotype}SC.R2.fastq.gz',
+        unpaired_reads = (
+            'output/filter_contamination2/{genotype}SC.unpaired.fastq.gz'),
         assembly = match_reduced_assembly,
         index = match_reduced_assembly_index
     output:
@@ -713,26 +702,10 @@ rule clean_fastqc:
         "fastqc -o {params.outdir} {input.fwd_reads} {input.rev_reads} "
         "{input.merged_reads}"
 
-rule contam_filter_fastqc:
-    input:
-        fwd_reads = 'output/filter_contamination{iter}/{sample}.R1.fastq.gz',
-        rev_reads = 'output/filter_contamination{iter}/{sample}.R2.fastq.gz',
-        unpaired_reads = (
-            'output/filter_contamination{iter}/{sample}.unpaired' + '.fastq.gz')
-    output:
-        'output/contam_filter_fastqc{iter}/{sample}.R1_fastqc.html',
-        'output/contam_filter_fastqc{iter}/{sample}.R2_fastqc.html',
-        'output/contam_filter_fastqc{iter}/{sample}.unpaired_fastqc.html'
-    params:
-        outdir = 'output/contam_filter_fastqc{iter}'
-    shell:
-        "fastqc -o {params.outdir} {input.fwd_reads} {input.rev_reads} "
-        "{input.unpaired_reads}"
-
 rule quast:
     input:
         unpack(get_iterations_reads),
-        assembly = 'output/assembly{iter}/{genotype}SC.fasta',
+        assembly = 'output/length_filter_assembly{iter}/{genotype}SC.fasta',
     output:
         'output/quast{iter}/{genotype}/report.html'
     threads: 6
@@ -745,52 +718,25 @@ rule quast:
         "-2 {input.rev_reads} -t {threads} --no-snps {input.assembly}"
 
 rule busco:
-    input: 'output/assembly{iter}/{genotype}SC.fasta'
+    input: 'output/length_filter_assembly{iter}/{genotype}SC.fasta'
     output: 'output/busco{iter}/{genotype}/short_summary_{genotype}.txt'
     threads: 8
     params:
         outdir = 'output/busco{iter}/{genotype}'
     script: 'scripts/busco.py'
 
-rule quast_reduced_assembly:
-    input:
-        unpack(get_clean_reads),
-        assembly = 'output/length_filter_reduced_assembly/{genotype}SC.fasta',
-    output:
-        'output/quast_reduced_assembly/{genotype}/report.html'
-    threads: 6
-    params:
-        outdir = "output/quast_reduced_assembly/{genotype}"
-    resources:
-        mem_mb = 40000
-    shell:
-        "quast.py -o {params.outdir} --eukaryote -1 {input.fwd_reads} "
-        "-2 {input.rev_reads} -t {threads} --no-snps {input.assembly}"
-
-rule busco_reduced_assembly:
-    input: 'output/length_filter_reduced_assembly/{genotype}SC.fasta'
-    output: 'output/reduced_assembly_busco/{genotype}/short_summary_{genotype}.txt'
-    threads: 8
-    params:
-        outdir = 'output/reduced_assembly_busco/{genotype}'
-    script: 'scripts/busco.py'
-
 rule multiqc:
     input:
-        expand('output/contam_filter_fastqc{iter}/{sample}.R1_fastqc.html',
-               iter=[1, 2], sample=SAMPLE),
-        expand('output/contam_filter_fastqc{iter}/{sample}.R2_fastqc.html',
-               iter=[1, 2], sample=SAMPLE),
-        expand('output/contam_filter_fastqc{iter}/{sample}.unpaired_fastqc.html',
-               iter=[1, 2], sample=SAMPLE),
+        expand('output/raw_fastqc/{sample}.R1_fastqc.html', sample=SAMPLE),
+        expand('output/raw_fastqc/{sample}.R2_fastqc.html', sample=SAMPLE),
+        expand('output/clean_fastqc/{sample}.R1_fastqc.html', sample=SAMPLE),
+        expand('output/clean_fastqc/{sample}.R2_fastqc.html', sample=SAMPLE),
+        expand('output/clean_fastqc/{sample}.merged_fastqc.html', 
+               sample=SAMPLE),
         expand('output/quast{iter}/{genotype}/report.html',
-               iter=ITERATIONS, genotype=GENOTYPE),
+               iter=ALL_ITER, genotype=GENOTYPE),
         expand('output/busco{iter}/{genotype}/short_summary_{genotype}.txt',
-               iter=ITERATIONS, genotype=GENOTYPE),
-        expand('output/reduced_assembly_busco/{genotype}/short_summary_{genotype}.txt',
-               genotype=GENOTYPE),
-        expand('output/quast_reduced_assembly/{genotype}/report.html',
-               genotype=GENOTYPE)
+               iter=ALL_ITER, genotype=GENOTYPE)
     output: 'output/multiqc/multiqc.html'
     shell:
         'multiqc -f -d -n {output} .'
