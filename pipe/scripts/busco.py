@@ -20,9 +20,8 @@ local.env['AUGUSTUS_CONFIG_PATH'] = str(local.path(
 assembly = local.path(snakemake.input)
 lineage_file = local.path(snakemake.config['busco_database'])
 tmp_outdir = outdir_root / ('run_' + snakemake.wildcards.genotype)
-tmp_outdir.mkdir()
 
-with local.cwd(tmp_outdir):
+with local.cwd(outdir_root):
     busco['-i', assembly, '-o', snakemake.wildcards.genotype, "-l",
           lineage_file, '-m', 'geno', '-f'] & FG
 
