@@ -286,7 +286,7 @@ rule assembly:
         output_dir = 'output/assembly{iter}/{genotype}SC_spades'
     threads: 8
     resources:
-        mem_mb = 80000
+        mem_mb = 100000
     shell:
         "python2 util/spades/bin/spades.py -1 {input.fwd_reads} -2 "
         "{input.rev_reads} -s {input.unpaired_reads} --threads {threads} "
@@ -655,7 +655,7 @@ rule index_reduced_assembly:
         output_prefix = "output/filter_mitochondrial_scaffolds/{genotype}SC"
     shell:
         "bowtie2-build {input} {params.output_prefix} && "
-        "samtools index {input} && "
+        "samtools faidx {input} && "
         "picard CreateSequenceDictionary R={input} O={output.picard}"
 
 # }}}
@@ -703,7 +703,8 @@ rule call_variants:
     input:
         bam = 'output/mark_duplicates/{sample}.bam',
         bai = 'output/mark_duplicates/{sample}.bam.bai',
-        assembly = match_reduced_assembly
+        assembly = match_reduced_assembly,
+        index = match_reduced_assembly_index
     output:
         'output/call_variants/{sample}.g.vcf'
     resources:
