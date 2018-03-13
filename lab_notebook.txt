@@ -1,4 +1,4 @@
-===============================================================================
+G===============================================================================
 Fenner Macrae Megadaph - Nuclear Analysis Lab Notebook
 ===============================================================================
 
@@ -681,7 +681,58 @@ Plan for first round of contamination removal:
 ================================================================================
 February 13th, 2018
 ================================================================================
-- Initial round of decontamination completed. Adjusted removal criteria remove:
+- Initial round of decontamination completed. Adjusted removal criteria to
+  remove and reran:
 1. Contigs with bacterial/plant/archaeal/viral taxonomic assignments
 2. Contigs with GC > 0.6
 3. Contigs with coverage < 10
+
+================================================================================
+February 20th, 2018
+================================================================================
+- Decontamination iteration 1 completed successfully. The majority of
+  contamination seems to be gone. Observed the following contamination
+  candidates in some assemblies:
+    1. Contigs with strong BLAST hits to primates
+    2. Contigs with various fungal taxonomic assignments.
+    3. New bacterial contigs
+    4. Contigs with ~0 coverage in some samples.
+
+- Wrote a script for the second iteration of decontamination to target these
+  candidates. Also included a step to remove the mitochondrial contigs.
+
+================================================================================
+February 22nd, 2018
+================================================================================
+- Had to remove the mitochondrial filter step from the pipeline since it was 
+missing in some assemblies. Will have to do mitochondrial filtering manually 
+after the redundans step in the pipeline.
+
+================================================================================
+February 26th, 2018
+================================================================================
+- Added redundans, duplicate removal and basic variant calling to the pipeline.
+  Pipeline will probably have to run for a week or so.
+
+================================================================================
+March 5th, 2018
+================================================================================
+- Redundans process got stuck for a couple of inputs over the weekend. Restarted
+with larger memory allocations.
+
+================================================================================
+March 6th, 2018
+================================================================================
+- Added script for filtering mitochondrial scaffolds from the redundans filtered
+assembly.
+
+================================================================================
+March 9th, 2018
+================================================================================
+- Pipeline had a bunch of errors which I patched and reran.
+
+================================================================================
+March 12th, 2018
+================================================================================
+- Redundans still running for a couple of samples (has been running for > 3 
+days).
