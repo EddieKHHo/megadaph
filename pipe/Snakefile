@@ -51,8 +51,7 @@ def get_iterations_reads(wildcards):
 
     outdict = {}
     if wildcards.iter == '_reduced':
-        final_iter = DECONTAM_ITER[-1]
-        read_dir = os.path.join('output', 'filter_contamination' + final_iter)
+        read_dir = os.path.join('output', 'filter_contamination_reduced')
         outdict['fwd_reads'] = os.path.join(read_dir, smp + '.R1.fastq.gz')
         outdict['rev_reads'] = os.path.join(read_dir, smp + '.R2.fastq.gz')
         outdict['unpaired_reads'] = os.path.join(read_dir,
@@ -87,6 +86,21 @@ def get_assembly_covfiles_from_genotype(wildcards):
                           "/", x, ".bam.cov"])
                  for x in sample_names]
     return cov_files
+
+
+def get_filter_alignment(wildcards):
+    try:
+        smp = wildcards.sample
+    except AttributeError:
+        smp = wildcards.genotype + 'SC'
+
+    if wildcards.iter == '_reduced':
+        bam = ''.join(['output/preliminary_alignment_to_reduced/', 
+                       smp, '.bam'])
+    else:
+        bam = ''.join(['output/align_to_assembly', wildcards.iter, '/', 
+                       smp, '.bam'])
+    return bam
 
 
 def get_samples_for_genotype(wildcards):
@@ -137,10 +151,20 @@ def match_reduced_assembly_index(wildcards):
     return index
 
 
-def bowtie2_idx_root(idx):
+def get_bowtie2_idx_root(index):
     """Given the path to a forward bowtie2 index, return its root name"""
-    return os.path.splitext(os.path.splitext(idx)[0])[0]
+    return os.path.splitext(os.path.splitext(index)[0])[0]
 
+
+def get_exclusions(wildcards):
+    '''Get the list of exclusions for a decontamination iteration'''
+    if wildcards.iter == '_reduced':
+        exclusions = ''.join(['output/filter_mitochondrial_scaffolds/',
+                              wildcards.genotype, 'SC.txt'])
+    else:
+        exclusions = ''.join(['output/find_contam_contigs', wildcards.iter, 
+                              '/', wildcards.genotype, '.txt'])
+    return exclusions
 # }}}
 
 # ==============================================================================
@@ -186,8 +210,8 @@ rule trim_adapters:
         fwd_reads = 'input/reads/{sample}.R1.fastq.gz',
         rev_reads = 'input/reads/{sample}.R2.fastq.gz'
     output:
-        fwd_reads = 'output/trim_adapters/{sample}.R1.fastq.gz',
-        rev_reads = 'output/trim_adapters/{sample}.R2.fastq.gz'
+        fwd_reads = temp('output/trim_adapters/{sample}.R1.fastq.gz'),
+        rev_reads = temp('output/trim_adapters/{sample}.R2.fastq.gz')
     log: "output/trim_adapters/log/{sample}.log"
     threads: 10
     params:
@@ -262,7 +286,7 @@ rule assembly:
         output_dir = 'output/assembly{iter}/{genotype}SC_spades'
     threads: 8
     resources:
-        mem_mb = 80000
+        mem_mb = 100000
     shell:
         "python2 util/spades/bin/spades.py -1 {input.fwd_reads} -2 "
         "{input.rev_reads} -s {input.unpaired_reads} --threads {threads} "
@@ -271,7 +295,13 @@ rule assembly:
 
 rule length_filter_assembly:
     input:
-        'output/assembly{iter}/{genotype}SC.fasta'
+        lambda wildcards: (
+            ''.join(['output/filter_mitochondrial_scaffolds/', 
+                     wildcards.genotype, 'SC.fasta'])
+            if wildcards.iter == '_reduced' else
+            ''.join(['output/assembly', wildcards.iter, '/', wildcards.genotype,
+                     'SC.fasta'])
+        )
     output:
         'output/length_filter_assembly{iter}/{genotype}SC.fasta'
     params:
@@ -346,15 +376,19 @@ rule align_to_assembly:
     threads: 12
     resources:
         mem_mb = 20000
+    params:
+        max_insert = 1000
     log:
         "output/align_to_assembly{iter}/log/{sample}.log"
     run:
-        index_prefix = bowtie2_idx_root(input.index)
-        shell("bowtie2 -1 {input.fwd_reads} -2 {input.rev_reads} "
-              "-U {input.unpaired_reads} -x " + index_prefix +
-              " -p {threads} | samtools view -bh - | "
-              "samtools sort - > {output.bam} 2> {log}")
-        shell("samtools index {output.bam}")
+        index_prefix = get_bowtie2_idx_root(input.index)
+        shell('bowtie2 -1 {input.fwd_reads} -2 {input.rev_reads} '
+              '-U {input.unpaired_reads} -X {params.max_insert} '
+              '-x ' + index_prefix + ' --rg-id={wildcards.sample} '
+              '--rg=LIB:{wildcards.sample} --rg=PL:illumina '
+              '--rg=SM:{wildcards.sample} -p {threads} | samtools view -bh - | '
+              'samtools sort - > {output.bam} 2> {log}')
+        shell('samtools index {output.bam}')
 
 rule convert_alignment_to_cov:
     input:
@@ -464,7 +498,7 @@ rule find_contam_contigs:
     shell:
         '{params.find_contam_contigs} {input} > {output}'
 
-# 
+ 
 # rule add_mitochondrial_contigs_to_exclusions:
 #     input:
 #         mito = 'output/find_mitochondrial_contigs/{genotype}.txt',
@@ -478,8 +512,8 @@ rule find_contam_contigs:
 # List the contigs which passed the filtering step
 rule generate_inclusion_list:
     input:
-        exclusions = 'output/find_contam_contigs{iter}/{genotype}.txt',
-        assembly = "output/assembly{iter}/{genotype}SC.fasta"
+        exclusions = get_exclusions,
+        assembly = get_filter_alignment 
     output:
         "output/generate_inclusion_list{iter}/{genotype}.txt"
     shell:
@@ -492,7 +526,7 @@ rule filter_contamination:
         passing_contigs = lambda wildcards: ''.join([
             "output/generate_inclusion_list", wildcards.iter, "/",
             get_genotype_for_sample(wildcards), ".txt"]),
-        bam = "output/align_to_assembly{iter}/{sample}.bam"
+        bam = get_filter_alignment
     output:
         fwd = "output/filter_contamination{iter}/{sample}.R1.fastq.gz",
         rev = "output/filter_contamination{iter}/{sample}.R2.fastq.gz",
@@ -532,7 +566,8 @@ rule redundans:
             'output/filter_contamination2/{genotype}SC.unpaired.fastq.gz'),
         assembly = 'output/assembly3/{genotype}SC.fasta'
     output:
-        'output/redundans/{genotype}SC.fasta'
+        fasta = 'output/redundans/{genotype}SC.fasta',
+        index = 'output/redundans/{genotype}SC.1.bt2'
     params:
         outdir = 'output/redundans/{genotype}'
     threads: 16
@@ -547,12 +582,14 @@ rule redundans:
               '-l {input.unpaired_reads} '
               '-o {params.outdir} -r {config[nuclear_reference]} -t {threads} '
               '2> {log}')
-        shell('mv {params.outdir}/scaffolds.reduced.fa {output}')
-        shell('samtools faidx {output}')
+        shell('mv {params.outdir}/scaffolds.reduced.fa {output.fasta}')
+        shell('samtools faidx {output.fasta}')
+        index_prefix = os.path.splitext(output.fasta)[0]
+        shell('bowtie2-build {output.fasta} ' + index_prefix)
 
 rule blast_against_mitochondria:
     input:
-        'output/length_filter_assembly_reduced/{genotype}SC.fasta'
+        'output/redundans/{genotype}SC.fasta'
     output:
         list = 'output/blast_against_mitochondria/{genotype}.txt',
         blast = 'output/blast_against_mitochondria/{genotype}.tsv'
@@ -567,18 +604,46 @@ rule blast_against_mitochondria:
 rule filter_mitochondrial_scaffolds:
     input:
         blast = 'output/blast_against_mitochondria/{genotype}.tsv',
-        assembly = 'output/length_filter_assembly_reduced/{genotype}SC.fasta'
+        assembly = 'output/redundans/{genotype}SC.fasta'
     output:
-        'output/filter_mitochondrial_scaffolds/{genotype}SC.fasta'
+        fasta = 'output/filter_mitochondrial_scaffolds/{genotype}SC.fasta',
+        txt = 'output/filter_mitochondrial_scaffolds/{genotype}SC.txt'
     shell:
         'scripts/filter_mitochondrial_scaffolds.py --blast {input.blast} '
-        '--assembly {input.assembly} --outfile {output} && '
-# }}}
+        '--assembly {input.assembly} --outfasta {output.fasta} '
+        '--outtxt {output.txt}'
+        
 
-# ==============================================================================
-# Variant Calling Pre-Processing
-# ==============================================================================
-# {{{
+rule preliminary_alignment_to_reduced:
+    input:
+        fwd_reads = 'output/filter_contamination2/{sample}.R1.fastq.gz',
+        rev_reads = 'output/filter_contamination2/{sample}.R2.fastq.gz',
+        unpaired_reads = (
+            'output/filter_contamination2/{sample}.unpaired.fastq.gz'),
+        assembly = lambda wildcards: (
+            'output/redundans/' + wildcards.sample[0:2] + 'SC.fasta'),
+        index = lambda wildcards: (
+            'output/redundans/' + wildcards.sample[0:2] + 'SC.1.bt2')
+    output:
+        bam = 'output/preliminary_alignment_to_reduced/{sample}.bam',
+        bai = 'output/preliminary_alignment_to_reduced/{sample}.bam.bai'
+    threads: 12
+    resources:
+        mem_mb = 20000
+    params:
+        max_insert = 1000
+    log:
+        "output/preliminary_alignment_to_reduced/log/{sample}.log"
+    run:
+        index_prefix = get_bowtie2_idx_root(input.index)
+        shell('bowtie2 -1 {input.fwd_reads} -2 {input.rev_reads} '
+              '-U {input.unpaired_reads} -X {params.max_insert} '
+              '-x ' + index_prefix + ' --rg-id={wildcards.sample} '
+              '--rg=LIB:{wildcards.sample} --rg=PL:illumina '
+              '--rg=SM:{wildcards.sample} -p {threads} | samtools view -bh - | '
+              'samtools sort - > {output.bam} 2> {log}')
+        shell('samtools index {output.bam}')
+
 rule index_reduced_assembly:
     input:
         'output/filter_mitochondrial_scaffolds/{genotype}SC.fasta'
@@ -590,38 +655,19 @@ rule index_reduced_assembly:
         output_prefix = "output/filter_mitochondrial_scaffolds/{genotype}SC"
     shell:
         "bowtie2-build {input} {params.output_prefix} && "
-        "samtools index {input} && "
+        "samtools faidx {input} && "
         "picard CreateSequenceDictionary R={input} O={output.picard}"
 
-rule align_to_reduced_assembly:
-    input:
-        fwd_reads = 'output/filter_contamination2/{genotype}SC.R1.fastq.gz',
-        rev_reads = 'output/filter_contamination2/{genotype}SC.R2.fastq.gz',
-        unpaired_reads = (
-            'output/filter_contamination2/{genotype}SC.unpaired.fastq.gz'),
-        assembly = match_reduced_assembly,
-        index = match_reduced_assembly_index
-    output:
-        bam = 'output/align_to_reduced_assembly/{sample}.bam',
-        bai = 'output/align_to_reduced_assembly/{sample}.bam.bai'
-    threads: 12
-    resources:
-        mem_mb = 20000
-    log:
-        "output/align_to_reduced_assembly/log/{sample}.log"
-    run:
-        index_prefix = bowtie2_idx_root(input.index)
-        shell("bowtie2 -1 {input.fwd_reads} -2 {input.rev_reads} "
-              "-U {input.unpaired_reads} -X 1000 -x " + index_prefix +
-              " --rg-id={wildcards.sample} --rg=LIB:{wildcards.sample} "
-              "--rg=PL:illumina --rg=SM:{wildcards.sample} -p {threads} | "
-              "samtools view -bh - | "
-              "samtools sort - > {output.bam} 2> {log}")
-        shell("samtools index {output.bam}")
+# }}}
+
+# ==============================================================================
+# Variant Calling Pre-Processing
+# ==============================================================================
+# {{{
 
 rule mark_duplicates:
     input:
-        'output/align_to_reduced_assembly/{sample}.bam'
+        'output/align_to_assembly_reduced/{sample}.bam'
     output:
         bam = 'output/mark_duplicates/{sample}.bam',
         bai = 'output/mark_duplicates/{sample}.bam.bai'
@@ -657,7 +703,8 @@ rule call_variants:
     input:
         bam = 'output/mark_duplicates/{sample}.bam',
         bai = 'output/mark_duplicates/{sample}.bam.bai',
-        assembly = match_reduced_assembly
+        assembly = match_reduced_assembly,
+        index = match_reduced_assembly_index
     output:
         'output/call_variants/{sample}.g.vcf'
     resources:
