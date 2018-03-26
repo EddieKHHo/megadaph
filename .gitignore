@@ -12,6 +12,8 @@
 *.bam
 slurm*.out
 .snakemake*
+tags*
+redundans_test
 /data/
 devpipe
 pipe/input
