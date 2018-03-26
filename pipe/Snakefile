@@ -286,7 +286,7 @@ rule assembly:
         output_dir = 'output/assembly{iter}/{genotype}SC_spades'
     threads: 8
     resources:
-        mem_mb = 100000
+        mem_mb = 150000
     shell:
         "python2 util/spades/bin/spades.py -1 {input.fwd_reads} -2 "
         "{input.rev_reads} -s {input.unpaired_reads} --threads {threads} "
@@ -667,16 +667,17 @@ rule index_reduced_assembly:
 
 rule mark_duplicates:
     input:
-        'output/align_to_assembly_reduced/{sample}.bam'
+        bam = 'output/align_to_assembly_reduced/{sample}.bam',
+        bai = 'output/align_to_assembly_reduced/{sample}.bam.bai'
     output:
         bam = 'output/mark_duplicates/{sample}.bam',
         bai = 'output/mark_duplicates/{sample}.bam.bai'
     resources:
-        mem_mb = 20000 
+        mem_mb = 30000 
     log:
         'output/mark_duplicates/log/{sample}.log'
     shell:
-        'picard MarkDuplicates I={input} O={output.bam} REMOVE_DUPLICATES=True '
+        'picard MarkDuplicates I={input.bam} O={output.bam} REMOVE_DUPLICATES=True '
         'M={log} && samtools index {output.bam}'
 
 # rule recalibrate_base_quality:
