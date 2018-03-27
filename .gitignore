@@ -13,7 +13,7 @@
 slurm*.out
 .snakemake*
 tags*
-redundans_test
+exploratory_analyses
 /data/
 devpipe
 pipe/input
