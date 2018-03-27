@@ -11,7 +11,10 @@ from plumbum import (
     FG,
     local,
 )
-from plumbum.cmd import cat
+from plumbum.cmd import (
+    busco,
+    cat,
+)
 
 # ==============================================================================
 # Set up
@@ -32,8 +35,22 @@ GENOTYPE_SAMPLE = {}
 for genotype in GENOTYPE:
     GENOTYPE_SAMPLE[genotype] = [x for x in SAMPLE if x.startswith(genotype)]
 
-ALL_ITER = ['1', '2', '3', '_reduced']
+# Decontamination was done in several iterations, with each iteration consisting
+# of:
+# 1. Assembly
+# 2. Blobplots/Covplots
+# 3. Contamination filtering
+# Outputs from contamination were reassembled. This was continued until minimal
+# contamination was evident in blobplots
+ALL_FILTER_ITER = ['1', '2', '3', '_reduced']
 DECONTAM_ITER = ['1', '2']
+
+# Variant calling was also done iteratively.
+# In the first step, variants with default parameters and high confidence
+# variants were called.
+# In the second step, this initial variant set was used to estimate
+# heterozygosity and variant were re-called.
+CALL_ITER = ['_initial']
 # }}}}
 
 # ==============================================================================
@@ -129,7 +146,7 @@ def match_reduced_assembly(wildcards):
     '''Given the sample, return the redundans reduced assembly'''
     starting_control = get_starting_control(wildcards)
     assembly = os.path.join("output",
-                            "filter_mitochondrial_scaffolds",
+                            "length_filter_assembly_reduced",
                             starting_control + ".fasta")
     return assembly
 
@@ -146,7 +163,7 @@ def match_reduced_assembly_index(wildcards):
     """Given the sample, return the redundans reduced ssembly bowtie2 index"""
     starting_control = get_starting_control(wildcards)
     index = os.path.join("output",
-                         "filter_mitochondrial_scaffolds",
+                         "length_filter_assembly_reduced",
                          starting_control + ".1.bt2")
     return index
 
@@ -176,12 +193,13 @@ rule all:
         'output/multiqc/multiqc.html',
         expand("output/produce_blobplots{iter}/{genotype}/family/{genotype}."
                "bestsum.family.p20.span.100.blobplot.cov0.png",
-               genotype=GENOTYPE, iter=ALL_ITER),
+               genotype=GENOTYPE, iter=ALL_FILTER_ITER),
         expand("output/produce_covplots{iter}/{sample}.covsum.png",
-               sample=SAMPLE, iter=ALL_ITER),
+               sample=SAMPLE, iter=ALL_FILTER_ITER),
         expand("output/find_contam_contigs{iter}/{genotype}.txt",
                iter=DECONTAM_ITER, genotype=GENOTYPE),
-        expand("output/call_variants/{sample}.g.vcf", sample=SAMPLE),
+        expand('output/genotype_gvcfs{iter}/{sample}.vcf', sample=SAMPLE,
+               iter=CALL_ITER),
         expand('output/blast_against_mitochondria/{genotype}.tsv',
                genotype=GENOTYPE)
         # }}}
@@ -286,7 +304,7 @@ rule assembly:
         output_dir = 'output/assembly{iter}/{genotype}SC_spades'
     threads: 8
     resources:
-        mem_mb = 100000
+        mem_mb = 150000
     shell:
         "python2 util/spades/bin/spades.py -1 {input.fwd_reads} -2 "
         "{input.rev_reads} -s {input.unpaired_reads} --threads {threads} "
@@ -309,15 +327,19 @@ rule length_filter_assembly:
             "1000" if wildcards.iter == "_reduced" else "200")
     shell: "length_filter_fasta.pl {params.minlen} {input} > {output}"
 
-rule bowtie2_index_assembly:
+rule index_length_filtered_assembly:
     input:
         'output/length_filter_assembly{iter}/{genotype}SC.fasta'
     output:
-        'output/length_filter_assembly{iter}/{genotype}SC.1.bt2'
+        bt2 = 'output/length_filter_assembly{iter}/{genotype}SC.1.bt2',
+        fai = 'output/length_filter_assembly{iter}/{genotype}SC.fasta.fai',
+        picard = 'output/length_filter_assembly{iter}/{genotype}SC.dict'
     params:
-        output_prefix = "output/length_filter_assembly{iter}/{genotype}SC"
+        output_prefix = 'output/length_filter_assembly{iter}/{genotype}SC'
     shell:
-        "bowtie2-build {input} {params.output_prefix}"
+        'bowtie2-build {input} {params.output_prefix} & '
+        'samtools faidx {input} & '
+        'picard CreateSequenceDictionary R={input} O={output.picard}'
 
 rule blast_assembly:
     input:
@@ -334,7 +356,6 @@ rule blast_assembly:
         "{params.max_target_seqs} -max_hsps 1 -evalue {params.evalue} -query "
         "{input} -out {output} -outfmt \"6 qseqid staxids bitscore std\" "
         "-num_threads {threads}"
-
 
 rule diamond_blast_assembly:
     input:
@@ -562,8 +583,6 @@ rule redundans:
     input:
         fwd_reads = 'output/filter_contamination2/{genotype}SC.R1.fastq.gz',
         rev_reads = 'output/filter_contamination2/{genotype}SC.R2.fastq.gz',
-        unpaired_reads = (
-            'output/filter_contamination2/{genotype}SC.unpaired.fastq.gz'),
         assembly = 'output/assembly3/{genotype}SC.fasta'
     output:
         fasta = 'output/redundans/{genotype}SC.fasta',
@@ -578,9 +597,8 @@ rule redundans:
     run:
         shell('rm -rf {params.outdir}')
         shell('python2 {config[redundans_bin]} -v -f {input.assembly} '
-              '-i {input.fwd_reads} {input.rev_reads} '
-              '-l {input.unpaired_reads} '
-              '-o {params.outdir} -r {config[nuclear_reference]} -t {threads} '
+              '-i {input.fwd_reads} {input.rev_reads} -o {params.outdir} '
+              '-r {config[nuclear_reference]} --norearrangements -t {threads} '
               '2> {log}')
         shell('mv {params.outdir}/scaffolds.reduced.fa {output.fasta}')
         shell('samtools faidx {output.fasta}')
@@ -667,17 +685,19 @@ rule index_reduced_assembly:
 
 rule mark_duplicates:
     input:
-        'output/align_to_assembly_reduced/{sample}.bam'
+        bam = 'output/align_to_assembly_reduced/{sample}.bam',
+        bai = 'output/align_to_assembly_reduced/{sample}.bam.bai'
     output:
         bam = 'output/mark_duplicates/{sample}.bam',
         bai = 'output/mark_duplicates/{sample}.bam.bai'
     resources:
-        mem_mb = 20000 
+        mem_mb = 30000 
     log:
         'output/mark_duplicates/log/{sample}.log'
     shell:
-        'picard MarkDuplicates I={input} O={output.bam} REMOVE_DUPLICATES=True '
-        'M={log} && samtools index {output.bam}'
+        'picard MarkDuplicates I={input.bam} O={output.bam} '
+        'REMOVE_DUPLICATES=True M={log} && '
+        'samtools index {output.bam}'
 
 # rule recalibrate_base_quality:
 #     input:
@@ -706,15 +726,43 @@ rule call_variants:
         assembly = match_reduced_assembly,
         index = match_reduced_assembly_index
     output:
-        'output/call_variants/{sample}.g.vcf'
+        gvcf = 'output/call_variants{iter}/{sample}.g.vcf',
+        local_reassembly_bam = 'output/call_variants{iter}/{sample}.bam'
     resources:
         mem_mb = 20000
+    params:
+        snp_heterozygosity = 0.015,
+        indel_heterozygosity = 0.01
     log:
-        'output/call_variants/{sample}.log'
+        'output/call_variants{iter}/log/{sample}.log'
     shell:
-        'gatk HaplotypeCaller -R {input.assembly} -I {input.bam} '
-        '--emit-ref-confidence GVCF -O {output}'
+        'gatk HaplotypeCaller '
+        '-R {input.assembly} -I '
+        '{input.bam} '
+        '--emit-ref-confidence GVCF '
+        '-O {output} '
+        '-hets {params.snp_heterozygosity} '
+        '-indelHeterozygosity {params.indel_heterozygosity} '
+        '-bamout {output.local_reassembly_bam}'
 
+rule genotype_gvcfs:
+    input:
+        gvcf = 'output/call_variants{iter}/{sample}.g.vcf',
+        ref = match_reduced_assembly,
+        index = match_reduced_assembly_index
+    output:
+        'output/genotype_gvcfs{iter}/{sample}.vcf'
+    params:
+        snp_heterozygosity = 0.015,
+        indel_heterozygosity = 0.01
+    shell:
+        'gatk GenotypeGVCFs '
+        '-R {input.ref} '
+        '-V {input.gvcf} '
+        '-O {output} '
+        '-allSites '
+        '-hets {params.snp_heterozygosity} '
+        '-indelHeterozygosity {params.indel_heterozygosity} '
 # }}}
 
 # ==============================================================================
@@ -769,8 +817,31 @@ rule busco:
     output: 'output/busco{iter}/{genotype}/short_summary_{genotype}.txt'
     threads: 8
     params:
-        outdir = 'output/busco{iter}/{genotype}'
-    script: 'scripts/busco.py'
+        outdir = 'output/busco{iter}/{genotype}',
+        evalue = 0.01
+    run: 
+        outdir = local.path(params.outdir)
+        outdir.delete()
+        outdir.mkdir()
+        outdir_root = outdir.dirname
+        local.env['BUSCO_CONFIG_FILE'] = local.path(config['busco_config'])
+        local.env['AUGUSTUS_CONFIG_PATH'] = local.path(
+            config['augustus_config'])
+        local.env['PATH'] = ':'.join([
+            local.path(config['augustus_scripts']), local.env['PATH']
+        ])
+        assembly = local.path(input)
+        lineage_file = local.path(config['busco_database'])
+        tmp_outdir = outdir_root / ('run_' + wildcards.genotype)
+
+        with local.cwd(outdir_root):
+            busco['-i', assembly, '-o', wildcards.genotype, '-l', lineage_file,
+            '-m', 'geno', '-f', '--cpu', threads, '-e', params.evalue] & FG
+
+            for f in tmp_outdir.list():
+                f.move(outdir)
+
+            tmp_outdir.delete()
 
 rule multiqc:
     input:
@@ -781,9 +852,10 @@ rule multiqc:
         expand('output/clean_fastqc/{sample}.merged_fastqc.html', 
                sample=SAMPLE),
         expand('output/quast{iter}/{genotype}/report.html',
-               iter=ALL_ITER, genotype=GENOTYPE),
+               iter=ALL_FILTER_ITER, genotype=GENOTYPE),
         expand('output/busco{iter}/{genotype}/short_summary_{genotype}.txt',
-               iter=ALL_ITER, genotype=GENOTYPE)
+               iter=ALL_FILTER_ITER, genotype=GENOTYPE),
+        expand('output/mark_duplicates/{sample}.bam', sample=SAMPLE)
     output: 'output/multiqc/multiqc.html'
     shell:
         'multiqc -f -d -n {output} .'

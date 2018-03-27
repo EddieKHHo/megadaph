@@ -12,6 +12,8 @@
 *.bam
 slurm*.out
 .snakemake*
+tags*
+exploratory_analyses
 /data/
 devpipe
 pipe/input
