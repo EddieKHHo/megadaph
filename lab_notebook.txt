@@ -662,14 +662,14 @@ January 31st, 2018
 ================================================================================
 February 2nd, 2018
 ================================================================================
-Initial round of blobplot and covplots are complete. 
+Initial round of blobplot and covplots are complete.
 
 --------------------------------------------------------------------------------
 Notes on initial plots
 --------------------------------------------------------------------------------
 - Major contaminant groups:
-Proteobacteria, Bacteria-undef, Cyanobacteria, Actinobacteria. 
-- Should be safe just removing all bacterial reads. 
+Proteobacteria, Bacteria-undef, Cyanobacteria, Actinobacteria.
+- Should be safe just removing all bacterial reads.
 - Initial inspection suggests that mitosporidial contigs
   Daphnia.
 
@@ -704,8 +704,8 @@ February 20th, 2018
 ================================================================================
 February 22nd, 2018
 ================================================================================
-- Had to remove the mitochondrial filter step from the pipeline since it was 
-missing in some assemblies. Will have to do mitochondrial filtering manually 
+- Had to remove the mitochondrial filter step from the pipeline since it was
+missing in some assemblies. Will have to do mitochondrial filtering manually
 after the redundans step in the pipeline.
 
 ================================================================================
@@ -734,7 +734,7 @@ March 9th, 2018
 ================================================================================
 March 12th, 2018
 ================================================================================
-- Redundans still running for a couple of samples (has been running for > 3 
+- Redundans still running for a couple of samples (has been running for > 3
 days).
 
 ================================================================================
@@ -743,9 +743,9 @@ March 22nd, 2018
 - Pipeline completed over break. Have initial variant sets for all lines except
 FBSC for which assembly still isn't working for some reason.
 - BUSCO reports suggest that redundans is being too aggressive in the reduction
-step; assemblies contain ~99 % of conserved genes before redundans and ~90 % 
-afterwards. 
-- Wrote a snakemake script which (1) runs just the reduction step of redundans 
+step; assemblies contain ~99 % of conserved genes before redundans and ~90 %
+afterwards.
+- Wrote a snakemake script which (1) runs just the reduction step of redundans
 with varying min-identity parameter values [0.5-0.98] and (2) creates a BUSCO
 report. From the results of that script we should be able to choose the identity
 parameter s.t reduction is maximized without loss of true genes from the
@@ -760,7 +760,7 @@ March 23rd, 2018
 - Results from redundans-test snakemake script:
   - All results contained ~98 % of BUSCO genes. This indicates that the
     reduction step of redundans may not be the culprit. Two options remain:
-    1). The BUSCO genes are in the assembly but BUSCO is missing them after 
+    1). The BUSCO genes are in the assembly but BUSCO is missing them after
         scaffolding
     2). Scaffolding/gap-closing is removing genes from the assembly.
   - 1 seems far more likely. To test, I reran BUSCO on all the redundans test
@@ -771,20 +771,20 @@ March 23rd, 2018
 March 26th, 2018
 ================================================================================
 - Results for BUSCO with relaxed e-value cutoff:
-    - This seemed to solve the problem at first: with a looser e-value cutoff, 
-      BUSCO found 98.6 % of expected genes across all redundans identity 
-      thresholds. I decided to leave the redundans step alone in the main 
+    - This seemed to solve the problem at first: with a looser e-value cutoff,
+      BUSCO found 98.6 % of expected genes across all redundans identity
+      thresholds. I decided to leave the redundans step alone in the main
       pipeline and rerun BUSCO with an e-value cutoff of 0.01
     - However, the BUSCO results were again ~ 89 % when run on the redundans
       data from the full pipeline.
     - It seems like some step other than reduction is causing the BUSCO genes to
       be lost.
-- For the next test I ran BUSCO on each intermediate redundans result for 
+- For the next test I ran BUSCO on each intermediate redundans result for
   the FA genotype to pinpoint which step causes the BUSCO genes to be lost.
-    - Results: 
+    - Results:
         1. Scaffolding with long reads removed the majority of the BUSCOs
         2. Scaffolding with the reference removed another ~5 BUSCOs.
-        3. The BUSCO genes removed by the reference scaffolding may have just 
+        3. The BUSCO genes removed by the reference scaffolding may have just
            drifted below BUSCO's significance threshold. I'll look at the BLAST
            results manually tomorrow.
 
@@ -807,9 +807,16 @@ evodify.com/gatk-the-best-practice-for-genotype-calling-in-a-non-model-organism/
 
     Main takeaways:
     - We need to be careful about heterozygosity levels, GATK is
-      targeted at human data, so heterozygosity parameters will likely need to 
+      targeted at human data, so heterozygosity parameters will likely need to
       be adjusted for our data. Tucker et al., 2013 estimates heterozygosity
       levels at ~0.01 in sexual D. pulex, so this might be a good approximation
       for now. We may need to produce our own estimates later.
     - Base quality score recalibration will probably not be possible for our
       data. The author argues that bootstrapping gives unsatisfactory results.
+
+================================================================================
+April 3rd, 2018
+================================================================================
+- The SLURM IBEST servers crashed last night so we lost 5 redundans jobs which
+  had been running for 6 days. Had to restart them fresh, which will put us back
+  another week unfortunately.
