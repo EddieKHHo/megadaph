@@ -112,10 +112,10 @@ def get_filter_alignment(wildcards):
         smp = wildcards.genotype + 'SC'
 
     if wildcards.iter == '_reduced':
-        bam = ''.join(['output/preliminary_alignment_to_reduced/', 
+        bam = ''.join(['output/preliminary_alignment_to_reduced/',
                        smp, '.bam'])
     else:
-        bam = ''.join(['output/align_to_assembly', wildcards.iter, '/', 
+        bam = ''.join(['output/align_to_assembly', wildcards.iter, '/',
                        smp, '.bam'])
     return bam
 
@@ -179,7 +179,7 @@ def get_exclusions(wildcards):
         exclusions = ''.join(['output/filter_mitochondrial_scaffolds/',
                               wildcards.genotype, 'SC.txt'])
     else:
-        exclusions = ''.join(['output/find_contam_contigs', wildcards.iter, 
+        exclusions = ''.join(['output/find_contam_contigs', wildcards.iter,
                               '/', wildcards.genotype, '.txt'])
     return exclusions
 # }}}
@@ -314,7 +314,7 @@ rule assembly:
 rule length_filter_assembly:
     input:
         lambda wildcards: (
-            ''.join(['output/filter_mitochondrial_scaffolds/', 
+            ''.join(['output/filter_mitochondrial_scaffolds/',
                      wildcards.genotype, 'SC.fasta'])
             if wildcards.iter == '_reduced' else
             ''.join(['output/assembly', wildcards.iter, '/', wildcards.genotype,
@@ -519,7 +519,7 @@ rule find_contam_contigs:
     shell:
         '{params.find_contam_contigs} {input} > {output}'
 
- 
+
 # rule add_mitochondrial_contigs_to_exclusions:
 #     input:
 #         mito = 'output/find_mitochondrial_contigs/{genotype}.txt',
@@ -534,7 +534,7 @@ rule find_contam_contigs:
 rule generate_inclusion_list:
     input:
         exclusions = get_exclusions,
-        assembly = get_filter_alignment 
+        assembly = get_filter_alignment
     output:
         "output/generate_inclusion_list{iter}/{genotype}.txt"
     shell:
@@ -591,7 +591,7 @@ rule redundans:
         outdir = 'output/redundans/{genotype}'
     threads: 16
     resources:
-        mem_mb = 100000
+        mem_mb = 200000
     log:
         'output/redundans/log/{genotype}.log'
     run:
@@ -630,7 +630,6 @@ rule filter_mitochondrial_scaffolds:
         'scripts/filter_mitochondrial_scaffolds.py --blast {input.blast} '
         '--assembly {input.assembly} --outfasta {output.fasta} '
         '--outtxt {output.txt}'
-        
 
 rule preliminary_alignment_to_reduced:
     input:
@@ -691,7 +690,7 @@ rule mark_duplicates:
         bam = 'output/mark_duplicates/{sample}.bam',
         bai = 'output/mark_duplicates/{sample}.bam.bai'
     resources:
-        mem_mb = 30000 
+        mem_mb = 30000
     log:
         'output/mark_duplicates/log/{sample}.log'
     shell:
@@ -726,8 +725,7 @@ rule call_variants:
         assembly = match_reduced_assembly,
         index = match_reduced_assembly_index
     output:
-        gvcf = 'output/call_variants{iter}/{sample}.g.vcf',
-        local_reassembly_bam = 'output/call_variants{iter}/{sample}.bam'
+        gvcf = 'output/call_variants{iter}/{sample}.g.vcf'
     resources:
         mem_mb = 20000
     params:
@@ -737,13 +735,12 @@ rule call_variants:
         'output/call_variants{iter}/log/{sample}.log'
     shell:
         'gatk HaplotypeCaller '
-        '-R {input.assembly} -I '
-        '{input.bam} '
+        '-R {input.assembly} '
+        '-I {input.bam} '
         '--emit-ref-confidence GVCF '
         '-O {output} '
-        '-hets {params.snp_heterozygosity} '
-        '-indelHeterozygosity {params.indel_heterozygosity} '
-        '-bamout {output.local_reassembly_bam}'
+        '--heterozygosity {params.snp_heterozygosity} '
+        '--indel-heterozygosity {params.indel_heterozygosity} '
 
 rule genotype_gvcfs:
     input:
@@ -760,9 +757,8 @@ rule genotype_gvcfs:
         '-R {input.ref} '
         '-V {input.gvcf} '
         '-O {output} '
-        '-allSites '
-        '-hets {params.snp_heterozygosity} '
-        '-indelHeterozygosity {params.indel_heterozygosity} '
+        '--heterozygosity {params.snp_heterozygosity} '
+        '--indel-heterozygosity {params.indel_heterozygosity} '
 # }}}
 
 # ==============================================================================
@@ -819,7 +815,7 @@ rule busco:
     params:
         outdir = 'output/busco{iter}/{genotype}',
         evalue = 0.01
-    run: 
+    run:
         outdir = local.path(params.outdir)
         outdir.delete()
         outdir.mkdir()
@@ -849,7 +845,7 @@ rule multiqc:
         expand('output/raw_fastqc/{sample}.R2_fastqc.html', sample=SAMPLE),
         expand('output/clean_fastqc/{sample}.R1_fastqc.html', sample=SAMPLE),
         expand('output/clean_fastqc/{sample}.R2_fastqc.html', sample=SAMPLE),
-        expand('output/clean_fastqc/{sample}.merged_fastqc.html', 
+        expand('output/clean_fastqc/{sample}.merged_fastqc.html',
                sample=SAMPLE),
         expand('output/quast{iter}/{genotype}/report.html',
                iter=ALL_FILTER_ITER, genotype=GENOTYPE),
