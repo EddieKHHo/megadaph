@@ -51,6 +51,8 @@ DECONTAM_ITER = ['1', '2']
 # In the second step, this initial variant set was used to estimate
 # heterozygosity and variant were re-called.
 CALL_ITER = ['_initial']
+
+VARIANT_TYPES = ['snps', 'indels']
 # }}}}
 
 # ==============================================================================
@@ -182,6 +184,11 @@ def get_exclusions(wildcards):
         exclusions = ''.join(['output/find_contam_contigs', wildcards.iter,
                               '/', wildcards.genotype, '.txt'])
     return exclusions
+
+
+def build_filter_expression(param):
+    filter_expression = ' || '.join([key + ' ' + value for key, value in param])
+    return filter_expression
 # }}}
 
 # ==============================================================================
@@ -198,10 +205,12 @@ rule all:
                sample=SAMPLE, iter=ALL_FILTER_ITER),
         expand("output/find_contam_contigs{iter}/{genotype}.txt",
                iter=DECONTAM_ITER, genotype=GENOTYPE),
-        expand('output/genotype_gvcfs{iter}/{sample}.vcf', sample=SAMPLE,
-               iter=CALL_ITER),
         expand('output/blast_against_mitochondria/{genotype}.tsv',
-               genotype=GENOTYPE)
+               genotype=GENOTYPE),
+        expand('output/extract_variant_quality_scores{iter}/{sample}.{type}.table',
+               iter=CALL_ITER, sample=SAMPLE, type=VARIANT_TYPES),
+        expand('output/plot_variant_quality_scores{iter}/{sample}.svg',
+               sample=SAMPLE, iter=CALL_ITER)
         # }}}
 
 # ==============================================================================
@@ -718,6 +727,12 @@ rule mark_duplicates:
 #         'gatk -T PrintReads -R {input.assembly} -I {input.bam} '
 #         '-BQSR {output.table} && samtools index {output.bam}'
 
+# }}}
+
+# ==============================================================================
+# Variant Calling
+# ==============================================================================
+# {{{
 rule call_variants:
     input:
         bam = 'output/mark_duplicates/{sample}.bam',
@@ -759,6 +774,108 @@ rule genotype_gvcfs:
         '-O {output} '
         '--heterozygosity {params.snp_heterozygosity} '
         '--indel-heterozygosity {params.indel_heterozygosity} '
+
+
+rule select_snps:
+    input:
+        vcf = 'output/genotype_gvcfs{iter}/{sample}.vcf'
+        ref = match_reduced_assembly,
+        index = match_reduced_assembly_index
+    output:
+        'output/select_variants{iter}/{sample}.snps.vcf'
+    shell:
+        'gatk SelectVariants '
+        '-R {input.ref} '
+        '-V {input.vcf} '
+        '-selectType SNP '
+        '-o {output}'
+
+
+rule select_indels:
+    input:
+        vcf = 'output/genotype_gvcfs{iter}/{sample}.vcf'
+        ref = match_reduced_assembly,
+        index = match_reduced_assembly_index
+    output:
+        'output/select_variants{iter}/{sample}.indels.vcf'
+    shell:
+        'gatk SelectVariants '
+        '-R {input.ref} '
+        '-V {input.vcf} '
+        '-selectType INDEL '
+        '-O {output}'
+
+rule extract_variant_quality_scores:
+    input:
+        vcf = 'output/select_variants{iter}/{sample}.{type}.vcf',
+        ref = match_reduced_assembly,
+        index = match_reduced_assembly_index
+    output:
+        'output/extract_variant_quality_scores{iter}/{sample}.{type}.table'
+    shell:
+        'gatk VariantsToTable '
+        '-R {input.ref} '
+        '-V {input.vcf} '
+        '-F CHROM -F QUAL -F QD -F DP -F MQ -F MQRankSum -F FS '
+        '-F ReadPosRankSum -F SOR '
+        '--allowMissingData '
+        '-O {output}'
+
+
+rule plot_variant_quality_scores:
+    input:
+        snps = 'output/extract_variant_quality_scores{iter}/{sample}.snps.vcf',
+        indels = (
+            'output/extract_variant_quality_scores{iter}/{sample}.indels.vcf')
+    output:
+        'output/plot_variant_quality_scores{iter}/{sample}.svg'
+    script:
+        'scripts/plot_variant_quality_scores.R'
+
+
+# rule filter_snps:
+#     input:
+#         vcf = 'output/select_variants{iter}/{sample}.snps.vcf',
+#         ref = match_reduced_assembly,
+#         index = match_reduced_assembly_index
+#     output:
+#         'output/filter_variants{iter}/{sample}.snps.vcf'
+#     params:
+#         QD = '< 2.0',
+#         FS = '> 60.0',
+#         MQ = '< 40.0',
+#         MQRankSum = '< -12.5',
+#         ReadPosRankSum = '< -8.0'
+#     run:
+#         filter_expression = build_filter_expression(params)
+#         'gatk VariantFiltration '
+#         '-R {input.ref} '
+#         '-V {input.vcf} '
+#         '-O {output} '
+#         '--filterName snp_filter '
+#         '--filterExpression ' + filter_expression
+#
+# rule filter_indels:
+#     input:
+#         vcf = 'output/select_variants{iter}/{sample}.indels.vcf',
+#         ref = match_reduced_assembly,
+#         index = match_reduced_assembly_index
+#     output:
+#         'output/filter_variants{iter}/{sample}.indels.vcf'
+#     params:
+#         QD = '< 2.0',
+#         FS = '> 200.0',
+#         ReadPosRankSum = '< -20.0'
+#     run:
+#         filter_expression = build_filter_expression(params)
+#         'gatk VariantFiltration '
+#         '-R {input.ref} '
+#         '-V {input.vcf} '
+#         '-O {output} '
+#         '--filterName indel_filter '
+#         '--filterExpression ' + filter_expression
+
+>>>>>>> Added snp/indel extraction + filtering
 # }}}
 
 # ==============================================================================
@@ -813,8 +930,7 @@ rule busco:
     output: 'output/busco{iter}/{genotype}/short_summary_{genotype}.txt'
     threads: 8
     params:
-        outdir = 'output/busco{iter}/{genotype}',
-        evalue = 0.01
+        outdir = 'output/busco{iter}/{genotype}'
     run:
         outdir = local.path(params.outdir)
         outdir.delete()
