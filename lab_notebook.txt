@@ -820,3 +820,13 @@ April 3rd, 2018
 - The SLURM IBEST servers crashed last night so we lost 5 redundans jobs which
   had been running for 6 days. Had to restart them fresh, which will put us back
   another week unfortunately.
+
+
+================================================================================
+April 11th, 2018
+================================================================================
+- Getting a new redundans error for the last remaining redundans jobs: lastal
+  Input/Output error. I opened an issue on the redundans github. My hunch is
+  that its memory related. So I'll try again with a 200 Gb allocation.
+
+
