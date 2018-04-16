@@ -7,6 +7,7 @@ from shutil import (
 from tempfile import NamedTemporaryFile
 from uuid import uuid4
 
+import numpy as np
 from plumbum import (
     FG,
     local,
@@ -15,6 +16,7 @@ from plumbum.cmd import (
     busco,
     cat,
 )
+import scipy.stats as st
 
 # ==============================================================================
 # Set up
@@ -28,8 +30,15 @@ SAMPLE, PAIR = glob_wildcards(
 # Remove duplicate entries
 SAMPLE = sorted(list(set(SAMPLE)))
 
+SAMPLE = [x for x in SAMPLE if "FA" not in x]
+SAMPLE = [x for x in SAMPLE if "GB" not in x]
+SAMPLE = [x for x in SAMPLE if "GC" not in x]
+SAMPLE = [x for x in SAMPLE if "IA" not in x]
+SAMPLE = [x for x in SAMPLE if "IC" not in x]
+
 # Genotype indices given by first two letters of sample name
 GENOTYPE = list(set([x[0:2] for x in SAMPLE]))
+print(GENOTYPE)
 
 GENOTYPE_SAMPLE = {}
 for genotype in GENOTYPE:
@@ -52,7 +61,7 @@ DECONTAM_ITER = ['1', '2']
 # heterozygosity and variant were re-called.
 CALL_ITER = ['_initial']
 
-VARIANT_TYPES = ['snps', 'indels']
+VARIANT_TYPES = ['snps', 'indels', 'other']
 # }}}}
 
 # ==============================================================================
@@ -186,8 +195,15 @@ def get_exclusions(wildcards):
     return exclusions
 
 
-def build_filter_expression(param):
-    filter_expression = ' || '.join([key + ' ' + value for key, value in param])
+def build_filter_expression(parameters):
+    param_list = []
+    for key, value in parameters.items():
+        if not isinstance(parameters[key], str):
+            for item in parameters[key]:
+                param_list.append(' '.join([key, item]))
+        else:
+            param_list.append(' '.join([key, value]))
+    filter_expression = '"' + ' || '.join(param_list) + '"'
     return filter_expression
 # }}}
 
@@ -210,7 +226,11 @@ rule all:
         expand('output/extract_variant_quality_scores{iter}/{sample}.{type}.table',
                iter=CALL_ITER, sample=SAMPLE, type=VARIANT_TYPES),
         expand('output/plot_variant_quality_scores{iter}/{sample}.svg',
-               sample=SAMPLE, iter=CALL_ITER)
+               sample=SAMPLE, iter=CALL_ITER),
+        expand('output/calc_number_filtered_sites{iter}/{sample}.{type}.txt',
+                iter=CALL_ITER, sample=SAMPLE, type=VARIANT_TYPES),
+        expand('output/depth_filter_variants{iter}/{sample}.{type}.vcf',
+               sample=SAMPLE, iter=CALL_ITER, type=VARIANT_TYPES)
         # }}}
 
 # ==============================================================================
@@ -600,7 +620,7 @@ rule redundans:
         outdir = 'output/redundans/{genotype}'
     threads: 16
     resources:
-        mem_mb = 200000
+        mem_mb = 100000
     log:
         'output/redundans/log/{genotype}.log'
     run:
@@ -775,10 +795,17 @@ rule genotype_gvcfs:
         '--heterozygosity {params.snp_heterozygosity} '
         '--indel-heterozygosity {params.indel_heterozygosity} '
 
+rule extract_variant_coverage:
+    input:
+        'output/genotype_gvcfs{iter}/{sample}.vcf'
+    output:
+        'output/extract_variant_coverage{iter}/{sample}.txt',
+    shell:
+        'extract_variant_coverage.py -o {output} {input}'
 
 rule select_snps:
     input:
-        vcf = 'output/genotype_gvcfs{iter}/{sample}.vcf'
+        vcf = 'output/genotype_gvcfs{iter}/{sample}.vcf',
         ref = match_reduced_assembly,
         index = match_reduced_assembly_index
     output:
@@ -787,13 +814,27 @@ rule select_snps:
         'gatk SelectVariants '
         '-R {input.ref} '
         '-V {input.vcf} '
-        '-selectType SNP '
-        '-o {output}'
+        '--select-type-to-include SNP '
+        '-O {output}'
 
+
+rule select_other:
+    input:
+        vcf = 'output/genotype_gvcfs{iter}/{sample}.vcf',
+        ref = match_reduced_assembly,
+        index = match_reduced_assembly_index
+    output:
+        'output/select_variants{iter}/{sample}.other.vcf'
+    shell:
+        'gatk SelectVariants '
+        '-R {input.ref} '
+        '-V {input.vcf} '
+        '--select-type-to-exclude SNP --select-type-to-exclude INDEL '
+        '-O {output}'
 
 rule select_indels:
     input:
-        vcf = 'output/genotype_gvcfs{iter}/{sample}.vcf'
+        vcf = 'output/genotype_gvcfs{iter}/{sample}.vcf',
         ref = match_reduced_assembly,
         index = match_reduced_assembly_index
     output:
@@ -802,7 +843,7 @@ rule select_indels:
         'gatk SelectVariants '
         '-R {input.ref} '
         '-V {input.vcf} '
-        '-selectType INDEL '
+        '--select-type-to-include INDEL '
         '-O {output}'
 
 rule extract_variant_quality_scores:
@@ -818,64 +859,122 @@ rule extract_variant_quality_scores:
         '-V {input.vcf} '
         '-F CHROM -F QUAL -F QD -F DP -F MQ -F MQRankSum -F FS '
         '-F ReadPosRankSum -F SOR '
-        '--allowMissingData '
         '-O {output}'
 
 
 rule plot_variant_quality_scores:
     input:
-        snps = 'output/extract_variant_quality_scores{iter}/{sample}.snps.vcf',
+        snps = 'output/extract_variant_quality_scores{iter}/{sample}.snps.table',
         indels = (
-            'output/extract_variant_quality_scores{iter}/{sample}.indels.vcf')
+            'output/extract_variant_quality_scores{iter}/{sample}.indels.table')
     output:
         'output/plot_variant_quality_scores{iter}/{sample}.svg'
     script:
         'scripts/plot_variant_quality_scores.R'
 
 
-# rule filter_snps:
-#     input:
-#         vcf = 'output/select_variants{iter}/{sample}.snps.vcf',
-#         ref = match_reduced_assembly,
-#         index = match_reduced_assembly_index
-#     output:
-#         'output/filter_variants{iter}/{sample}.snps.vcf'
-#     params:
-#         QD = '< 2.0',
-#         FS = '> 60.0',
-#         MQ = '< 40.0',
-#         MQRankSum = '< -12.5',
-#         ReadPosRankSum = '< -8.0'
-#     run:
-#         filter_expression = build_filter_expression(params)
-#         'gatk VariantFiltration '
-#         '-R {input.ref} '
-#         '-V {input.vcf} '
-#         '-O {output} '
-#         '--filterName snp_filter '
-#         '--filterExpression ' + filter_expression
-#
-# rule filter_indels:
-#     input:
-#         vcf = 'output/select_variants{iter}/{sample}.indels.vcf',
-#         ref = match_reduced_assembly,
-#         index = match_reduced_assembly_index
-#     output:
-#         'output/filter_variants{iter}/{sample}.indels.vcf'
-#     params:
-#         QD = '< 2.0',
-#         FS = '> 200.0',
-#         ReadPosRankSum = '< -20.0'
-#     run:
-#         filter_expression = build_filter_expression(params)
-#         'gatk VariantFiltration '
-#         '-R {input.ref} '
-#         '-V {input.vcf} '
-#         '-O {output} '
-#         '--filterName indel_filter '
-#         '--filterExpression ' + filter_expression
+rule filter_snps:
+    input:
+        vcf = 'output/select_variants{iter}/{sample}.snps.vcf',
+        ref = match_reduced_assembly,
+        index = match_reduced_assembly_index
+    output:
+        'output/filter_variants{iter}/{sample}.snps.vcf'
+    params:
+        QD = '< 2.0',
+        FS = '> 60.0',
+        MQ = '< 35.0',
+        MQRankSum = '< -12.5',
+        ReadPosRankSum = ['< -10.0', '> 10.0']
+    run:
+        filter_expression = build_filter_expression(params)
+        shell('gatk VariantFiltration '
+        '-R {input.ref} '
+        '-V {input.vcf} '
+        '-O {output} '
+        '--filter-name snp_filter '
+        '--filter-expression ' + filter_expression)
 
->>>>>>> Added snp/indel extraction + filtering
+rule filter_indels:
+    input:
+        vcf = 'output/select_variants{iter}/{sample}.indels.vcf',
+        ref = match_reduced_assembly,
+        index = match_reduced_assembly_index
+    output:
+        'output/filter_variants{iter}/{sample}.indels.vcf'
+    params:
+        QD = '< 5.0',
+        FS = '> 200.0',
+        ReadPosRankSum = ['< -10.0', '> 10.0']
+    run:
+        filter_expression = build_filter_expression(params)
+        shell('gatk VariantFiltration '
+        '-R {input.ref} '
+        '-V {input.vcf} '
+        '-O {output} '
+        '--filter-name indel_filter '
+        '--filter-expression ' + filter_expression)
+
+rule filter_other_variants:
+    input:
+        vcf = 'output/select_variants{iter}/{sample}.other.vcf',
+        ref = match_reduced_assembly,
+        index = match_reduced_assembly_index
+    output:
+        'output/filter_variants{iter}/{sample}.other.vcf'
+    params:
+        QD = '< 5.0',
+        FS = '> 200.0',
+        ReadPosRankSum = ['< -10.0', '> 10.0']
+    run:
+        filter_expression = build_filter_expression(params)
+        shell('gatk VariantFiltration '
+        '-R {input.ref} '
+        '-V {input.vcf} '
+        '-O {output} '
+        '--filter-name indel_filter '
+        '--filter-expression ' + filter_expression)
+
+rule calc_number_filtered_sites:
+    input:
+        pre = 'output/select_variants{iter}/{sample}.{type}.vcf',
+        post = 'output/filter_variants{iter}/{sample}.{type}.vcf'
+    output:
+        'output/calc_number_filtered_sites{iter}/{sample}.{type}.txt'
+    shell:
+        'echo "Sites prefilter: " >> {output}; '
+        'grep -vc "^#" {input.pre} >>  {output}; '
+        'echo "\nSites postfilter: " >> {output}; '
+        'grep -vc "^#" {input.post} >> {output}'
+
+
+rule depth_filter_variants:
+    input:
+        vcf = 'output/filter_variants{iter}/{sample}.{type}.vcf',
+        covfile = 'output/extract_variant_coverage{iter}/{sample}.txt',
+        ref = match_reduced_assembly,
+        index = match_reduced_assembly_index
+    output:
+        vcf = 'output/depth_filter_variants{iter}/{sample}.{type}.vcf',
+        percentiles = (
+            'output/depth_filter_variants{iter}/{sample}.{type}.percentiles.txt'
+        )
+    run:
+        # Remove variants below the not between 1-99th percentile
+        cov = np.loadtxt(input.covfile)
+        quant = (str(np.percentile(cov, 1)), str(np.percentile(cov, 99)))
+        with open(output.percentiles, 'a') as f:
+            print("99th Percentiles: {} - {} \n".format(quant[0], quant[1]),
+                  file=f)
+
+        shell('gatk VariantFiltration '
+              '-R {input.ref} '
+              '-V {input.vcf} '
+              '-O {output.vcf} '
+              '--filter-name depth_filter '
+              '--filter-expression "DP < ' + quant[0] + ' || DP > ' + quant[1] +
+              '"'
+              )
 # }}}
 
 # ==============================================================================
