@@ -229,7 +229,7 @@ rule all:
                sample=SAMPLE, iter=CALL_ITER),
         expand('output/calc_number_filtered_sites{iter}/{sample}.{type}.txt',
                 iter=CALL_ITER, sample=SAMPLE, type=VARIANT_TYPES),
-        expand('output/depth_filter_variants{iter}/{sample}.{type}.vcf',
+        expand('output/remove_filtered_variants{iter}/{sample}.{type}.vcf',
                sample=SAMPLE, iter=CALL_ITER, type=VARIANT_TYPES)
         # }}}
 
@@ -975,6 +975,20 @@ rule depth_filter_variants:
               '--filter-expression "DP < ' + quant[0] + ' || DP > ' + quant[1] +
               '"'
               )
+
+rule remove_filtered_variants:
+    input:
+        vcf = 'output/depth_filter_variants{iter}/{sample}.{type}.vcf',
+        ref = match_reduced_assembly,
+        index = match_reduced_assembly_index
+    output:
+        'output/remove_filtered_variants{iter}/{sample}.{type}.vcf'
+    shell:
+        'gatk SelectVariants '
+        '-R {input.ref} '
+        '-V {input.vcf} '
+        '-O {output} '
+        '--set-filtered-gt-to-nocall'
 # }}}
 
 # ==============================================================================
