@@ -343,8 +343,7 @@ rule assembly:
 rule length_filter_assembly:
     input:
         lambda wildcards: (
-            ''.join(['output/filter_mitochondrial_scaffolds/',
-                     wildcards.genotype, 'SC.fasta'])
+            ''.join(['output/repeatmasker/', wildcards.genotype, 'SC.fasta'])
             if wildcards.iter == '_reduced' else
             ''.join(['output/assembly', wildcards.iter, '/', wildcards.genotype,
                      'SC.fasta'])
@@ -549,16 +548,6 @@ rule find_contam_contigs:
         '{params.find_contam_contigs} {input} > {output}'
 
 
-# rule add_mitochondrial_contigs_to_exclusions:
-#     input:
-#         mito = 'output/find_mitochondrial_contigs/{genotype}.txt',
-#         other_contam = 'output/find_contam_contigs2/{genotype}.txt'
-#     output:
-#         'output/find_contam_contigs2/{genotype}_with_mitochondrial.txt'
-#     shell:
-#         'cat {input.mito} {input.other_contam} > {output}'
-
-
 # List the contigs which passed the filtering step
 rule generate_inclusion_list:
     input:
@@ -693,7 +682,6 @@ rule index_reduced_assembly:
         "bowtie2-build {input} {params.output_prefix} && "
         "samtools faidx {input} && "
         "picard CreateSequenceDictionary R={input} O={output.picard}"
-
 
 
 rule preliminary_alignment_to_reduced:
