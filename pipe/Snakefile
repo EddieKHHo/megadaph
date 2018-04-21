@@ -343,7 +343,7 @@ rule assembly:
 rule length_filter_assembly:
     input:
         lambda wildcards: (
-            ''.join(['output/repeatmasker/', wildcards.genotype, 'SC.fasta'])
+            ''.join(['output/repeatmasker/', wildcards.genotype, '.fasta'])
             if wildcards.iter == '_reduced' else
             ''.join(['output/assembly', wildcards.iter, '/', wildcards.genotype,
                      'SC.fasta'])
@@ -654,8 +654,8 @@ rule repeatmasker:
     input:
         'output/filter_mitochondrial_scaffolds/{genotype}SC.fasta'
     output:
-        masked = 'output/repeatmasker/{sample}.fasta',
-        out = 'output/repeatmasker/{sample}.out'
+        masked = 'output/repeatmasker/{genotype}.fasta',
+        out = 'output/repeatmasker/{genotype}.out'
     threads: 8
     run:
         shell('RepeatMasker '
