@@ -24,7 +24,8 @@ indel_color <- "#F4CCCA"
 
 QUAL <- ggplot(vcf, aes(x = QUAL, fill = variant)) +
   geom_density(alpha = 0.3) +
-  geom_vline(xintercept = 100, size = 0.7)
+  geom_vline(xintercept = 100, size = 0.7) +
+  xlim(0, 10000)
 
 DP <- ggplot(vcf, aes(x = DP, fill = variant)) +
   geom_density(alpha = 0.3) +
@@ -62,5 +63,5 @@ ReadPosRankSum <- ggplot(vcf, aes(x = ReadPosRankSum, fill = variant)) +
 
 svg(snakemake@output[[1]], height = 20, width = 15)
 theme_set(theme_gray(base_size = 18))
-grid.arrange(QD, DP, FS, MQ, MQRankSum, SOR, ReadPosRankSum, nrow = 4)
+grid.arrange(QUAL, QD, DP, FS, MQ, MQRankSum, SOR, ReadPosRankSum, nrow = 4)
 dev.off()

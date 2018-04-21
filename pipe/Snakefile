@@ -32,9 +32,9 @@ SAMPLE = sorted(list(set(SAMPLE)))
 
 SAMPLE = [x for x in SAMPLE if "FA" not in x]
 SAMPLE = [x for x in SAMPLE if "GB" not in x]
-SAMPLE = [x for x in SAMPLE if "GC" not in x]
-SAMPLE = [x for x in SAMPLE if "IA" not in x]
-SAMPLE = [x for x in SAMPLE if "IC" not in x]
+# SAMPLE = [x for x in SAMPLE if "GC" not in x]
+# SAMPLE = [x for x in SAMPLE if "IA" not in x]
+# SAMPLE = [x for x in SAMPLE if "IC" not in x]
 
 # Genotype indices given by first two letters of sample name
 GENOTYPE = list(set([x[0:2] for x in SAMPLE]))
@@ -229,8 +229,8 @@ rule all:
                sample=SAMPLE, iter=CALL_ITER),
         expand('output/calc_number_filtered_sites{iter}/{sample}.{type}.txt',
                 iter=CALL_ITER, sample=SAMPLE, type=VARIANT_TYPES),
-        expand('output/remove_filtered_variants{iter}/{sample}.{type}.vcf',
-               sample=SAMPLE, iter=CALL_ITER, type=VARIANT_TYPES)
+        expand('output/select_unique_variants{iter}/{sample}.{type}.table',
+                sample=SAMPLE, iter=CALL_ITER, type=VARIANT_TYPES)
         # }}}
 
 # ==============================================================================
@@ -634,6 +634,7 @@ rule redundans:
         index_prefix = os.path.splitext(output.fasta)[0]
         shell('bowtie2-build {output.fasta} ' + index_prefix)
 
+
 rule blast_against_mitochondria:
     input:
         'output/redundans/{genotype}SC.fasta'
@@ -659,6 +660,41 @@ rule filter_mitochondrial_scaffolds:
         'scripts/filter_mitochondrial_scaffolds.py --blast {input.blast} '
         '--assembly {input.assembly} --outfasta {output.fasta} '
         '--outtxt {output.txt}'
+
+rule repeatmasker:
+    input:
+        'output/filter_mitochondrial_scaffolds/{genotype}SC.fasta'
+    output:
+        masked = 'output/repeatmasker/{sample}.fasta',
+        out = 'output/repeatmasker/{sample}.out'
+    threads: 8
+    run:
+        shell('RepeatMasker '
+        '-lib config[repeat_library]'
+        '-s -par {threads} {input}')
+        input_dir = local.path(input).dirname
+        output_dir = local.path(output.masked).dirname
+        tmp_outputs = [input_dir / (wildcards.sample + suffix)
+                       for suffix in ['.masked', '.out']]
+        for tmp, final in zip(tmp_outputs, output):
+            tmp.move(final)
+
+
+rule index_reduced_assembly:
+    input:
+        'output/repeatmasker/{genotype}SC.fasta'
+    output:
+        bt2 = 'output/repeatmasker/{genotype}SC.1.bt2',
+        picard = 'output/repeatmasker/{genotype}SC.dict',
+        fai = 'output/repeatmasker/{genotype}SC.fasta.fai'
+    params:
+        output_prefix = "output/repeatmasker/{genotype}SC"
+    shell:
+        "bowtie2-build {input} {params.output_prefix} && "
+        "samtools faidx {input} && "
+        "picard CreateSequenceDictionary R={input} O={output.picard}"
+
+
 
 rule preliminary_alignment_to_reduced:
     input:
@@ -690,19 +726,6 @@ rule preliminary_alignment_to_reduced:
               'samtools sort - > {output.bam} 2> {log}')
         shell('samtools index {output.bam}')
 
-rule index_reduced_assembly:
-    input:
-        'output/filter_mitochondrial_scaffolds/{genotype}SC.fasta'
-    output:
-        bt2 = 'output/filter_mitochondrial_scaffolds/{genotype}SC.1.bt2',
-        picard = 'output/filter_mitochondrial_scaffolds/{genotype}SC.dict',
-        fai = 'output/filter_mitochondrial_scaffolds/{genotype}SC.fasta.fai'
-    params:
-        output_prefix = "output/filter_mitochondrial_scaffolds/{genotype}SC"
-    shell:
-        "bowtie2-build {input} {params.output_prefix} && "
-        "samtools faidx {input} && "
-        "picard CreateSequenceDictionary R={input} O={output.picard}"
 
 # }}}
 
@@ -727,25 +750,7 @@ rule mark_duplicates:
         'REMOVE_DUPLICATES=True M={log} && '
         'samtools index {output.bam}'
 
-# rule recalibrate_base_quality:
-#     input:
-#         bam = 'output/mark_duplicates/{sample}.bam',
-#         bai = 'output/mark_duplicates/{sample}.bam.bai',
-#         assembly = match_reduced_assembly
-#     output:
-#         table = 'output/recalibrate_base_quality/{sample}.table',
-#         bam = 'output/recalibrate_base_quality/{sample}.bam',
-#         bai = 'output/recalibrate_base_quality/{sample}.bam.bai'
-#     threads: 8
-#     resources:
-#         mem_mb = 20000
-#     log:
-#         'output/recalibrate_base_quality/log/{sample}.log'
-#     shell:
-#         'gatk -T BaseRecalibrator -nct {threads} -o {output.table} '
-#         '-R {input.assembly} -I {input.bam} 2> {log} && '
-#         'gatk -T PrintReads -R {input.assembly} -I {input.bam} '
-#         '-BQSR {output.table} && samtools index {output.bam}'
+
 
 # }}}
 
@@ -775,7 +780,9 @@ rule call_variants:
         '--emit-ref-confidence GVCF '
         '-O {output} '
         '--heterozygosity {params.snp_heterozygosity} '
+        '--output-mode EMIT_ALL_SITES '
         '--indel-heterozygosity {params.indel_heterozygosity} '
+
 
 rule genotype_gvcfs:
     input:
@@ -794,6 +801,7 @@ rule genotype_gvcfs:
         '-O {output} '
         '--heterozygosity {params.snp_heterozygosity} '
         '--indel-heterozygosity {params.indel_heterozygosity} '
+
 
 rule extract_variant_coverage:
     input:
@@ -816,7 +824,6 @@ rule select_snps:
         '-V {input.vcf} '
         '--select-type-to-include SNP '
         '-O {output}'
-
 
 rule select_other:
     input:
@@ -846,6 +853,28 @@ rule select_indels:
         '--select-type-to-include INDEL '
         '-O {output}'
 
+rule exclude_nonvariants:
+    input:
+        vcf = 'output/select_variants{iter}/{sample}.{type}.vcf',
+        ref = match_reduced_assembly,
+        index = match_reduced_assembly_index
+    output:
+        vcf = 'output/exclude_nonvariants{iter}/{sample}.{type}.vcf',
+        table = 'output/exclude_nonvariants{iter}/{sample}.{type}.table'
+    shell:
+        'gatk SelectVariants '
+        '-R {input.ref} '
+        '-V {input.vcf} '
+        '--exclude-non-variants '
+        '-O {output.vcf} && '
+        'gatk VariantsToTable '
+        '-R {input.ref} '
+        '-V {output.vcf} '
+        '-O {output.table} '
+        '-F CHROM -F POS -GF GT -F QUAL -F MQ -F DP -F TRANSTION -GF AD '
+        '-F "HOM-REF" -F "HOM-VAR" -F TYPE'
+
+
 rule extract_variant_quality_scores:
     input:
         vcf = 'output/select_variants{iter}/{sample}.{type}.vcf',
@@ -861,7 +890,6 @@ rule extract_variant_quality_scores:
         '-F ReadPosRankSum -F SOR '
         '-O {output}'
 
-
 rule plot_variant_quality_scores:
     input:
         snps = 'output/extract_variant_quality_scores{iter}/{sample}.snps.table',
@@ -871,7 +899,6 @@ rule plot_variant_quality_scores:
         'output/plot_variant_quality_scores{iter}/{sample}.svg'
     script:
         'scripts/plot_variant_quality_scores.R'
-
 
 rule filter_snps:
     input:
@@ -884,6 +911,8 @@ rule filter_snps:
         QD = '< 2.0',
         FS = '> 60.0',
         MQ = '< 35.0',
+        QUAL = '< 100',
+        SOR = '> 4.000',
         MQRankSum = '< -12.5',
         ReadPosRankSum = ['< -10.0', '> 10.0']
     run:
@@ -905,6 +934,8 @@ rule filter_indels:
     params:
         QD = '< 5.0',
         FS = '> 200.0',
+        QUAL = '< 100.0',
+        SOR = '> 10.000',
         ReadPosRankSum = ['< -10.0', '> 10.0']
     run:
         filter_expression = build_filter_expression(params)
@@ -951,30 +982,17 @@ rule calc_number_filtered_sites:
 rule depth_filter_variants:
     input:
         vcf = 'output/filter_variants{iter}/{sample}.{type}.vcf',
-        covfile = 'output/extract_variant_coverage{iter}/{sample}.txt',
         ref = match_reduced_assembly,
         index = match_reduced_assembly_index
     output:
-        vcf = 'output/depth_filter_variants{iter}/{sample}.{type}.vcf',
-        percentiles = (
-            'output/depth_filter_variants{iter}/{sample}.{type}.percentiles.txt'
-        )
-    run:
-        # Remove variants below the not between 1-99th percentile
-        cov = np.loadtxt(input.covfile)
-        quant = (str(np.percentile(cov, 1)), str(np.percentile(cov, 99)))
-        with open(output.percentiles, 'a') as f:
-            print("99th Percentiles: {} - {} \n".format(quant[0], quant[1]),
-                  file=f)
-
-        shell('gatk VariantFiltration '
-              '-R {input.ref} '
-              '-V {input.vcf} '
-              '-O {output.vcf} '
-              '--filter-name depth_filter '
-              '--filter-expression "DP < ' + quant[0] + ' || DP > ' + quant[1] +
-              '"'
-              )
+        vcf = 'output/depth_filter_variants{iter}/{sample}.{type}.vcf'
+    shell:
+        'gatk VariantFiltration '
+            '-R {input.ref} '
+            '-V {input.vcf} '
+            '-O {output.vcf} '
+            '--filter-name depth_filter '
+            '--filter-expression "DP < 10 || DP > 100"'
 
 rule remove_filtered_variants:
     input:
@@ -988,7 +1006,62 @@ rule remove_filtered_variants:
         '-R {input.ref} '
         '-V {input.vcf} '
         '-O {output} '
-        '--set-filtered-gt-to-nocall'
+        '--exclude-filtered '
+        '--exclude-non-variants'
+
+
+rule vcf_to_tab:
+    input:
+        vcf = 'output/remove_filtered_variants{iter}/{sample}.{type}.vcf',
+        ref = match_reduced_assembly,
+        index = match_reduced_assembly_index
+    output:
+        'output/vcf_to_tab{iter}/{sample}.{type}.table'
+    shell:
+        'gatk VariantsToTable '
+        '-R {input.ref} '
+        '-V {input.vcf} '
+        '-O {output} '
+        '-F CHROM -F POS -GF GT -F QUAL -F MQ -F DP -F TRANSTION -GF AD '
+        '-F "HOM-REF" -F "HOM-VAR" -F TYPE'
+
+rule select_unique_variants:
+    input:
+        filtered = expand('output/vcf_to_tab{{iter}}/{sample}.{{type}}.table',
+                sample=SAMPLE),
+        unfiltered = expand(
+                'output/exclude_nonvariants{{iter}}/{sample}.{{type}}.table',
+                sample=SAMPLE)
+    output:
+        expand('output/select_unique_variants{{iter}}/{sample}.{{type}}.table',
+                sample=SAMPLE)
+    resources:
+        mem_mb = 10000
+    run:
+        # Remove all sites in each filtered sample which are also present in any
+        # unfiltered sample of the same genotype.
+        output_prefix = os.path.dirname(output[0]) + '/'
+        for genotype in GENOTYPE:
+            genotype_samples = GENOTYPE_SAMPLE[genotype]
+            filtered_files = []
+            for f in input.filtered:
+                if any(substr in f for substr in genotype_samples):
+                    filtered_files.append(f)
+
+            for target in filtered_files:
+                comparisons = []
+                for f in input.unfiltered:
+                    if (any(substr in f for substr in genotype_samples) and
+                            local.path(target).name != local.path(f).name):
+                        comparisons.append(f)
+
+                shell('complement.py '
+                      '-o ' + output_prefix + ' '
+                      '--tab_separated '
+                      '-i 0,1,9 '
+                      '--target ' + target + ' ' +
+                      ' '.join([target] + comparisons))
+
 # }}}
 
 # ==============================================================================
@@ -1076,11 +1149,13 @@ rule multiqc:
         expand('output/clean_fastqc/{sample}.R2_fastqc.html', sample=SAMPLE),
         expand('output/clean_fastqc/{sample}.merged_fastqc.html',
                sample=SAMPLE),
+        expand('output/merge_reads/{sample}.hist', sample=SAMPLE),
         expand('output/quast{iter}/{genotype}/report.html',
                iter=ALL_FILTER_ITER, genotype=GENOTYPE),
         expand('output/busco{iter}/{genotype}/short_summary_{genotype}.txt',
                iter=ALL_FILTER_ITER, genotype=GENOTYPE),
-        expand('output/mark_duplicates/{sample}.bam', sample=SAMPLE)
+        expand('output/mark_duplicates/{sample}.bam', sample=SAMPLE),
+        expand('output/align_to_assembly_reduced/{sample}.bam', sample=SAMPLE)
     output: 'output/multiqc/multiqc.html'
     shell:
         'multiqc -f -d -n {output} .'
