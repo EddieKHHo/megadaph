@@ -1,4 +1,4 @@
-"""Megadaph Decontamination Pipeline"""
+"""Megadaph Variant Calling Pipeline"""
 import os
 from shutil import (
     move,
@@ -7,6 +7,7 @@ from shutil import (
 from tempfile import NamedTemporaryFile
 from uuid import uuid4
 
+from fmbiopy.fmlist import flatten
 import numpy as np
 from plumbum import (
     FG,
@@ -34,11 +35,10 @@ SAMPLE = [x for x in SAMPLE if "FA" not in x]
 SAMPLE = [x for x in SAMPLE if "GB" not in x]
 # SAMPLE = [x for x in SAMPLE if "GC" not in x]
 # SAMPLE = [x for x in SAMPLE if "IA" not in x]
-# SAMPLE = [x for x in SAMPLE if "IC" not in x]
+SAMPLE = [x for x in SAMPLE if "IC" not in x]
 
 # Genotype indices given by first two letters of sample name
 GENOTYPE = list(set([x[0:2] for x in SAMPLE]))
-print(GENOTYPE)
 
 GENOTYPE_SAMPLE = {}
 for genotype in GENOTYPE:
@@ -62,6 +62,15 @@ DECONTAM_ITER = ['1', '2']
 CALL_ITER = ['_initial']
 
 VARIANT_TYPES = ['snps', 'indels', 'other']
+
+# Suffixes for various types of fasta indices
+INDICES = {
+    'bowtie2': ['.1.bt2', '.2.bt2', '.3.bt2', '.4.bt2', '.rev.1.bt2',
+                '.rev.2.bt2'],
+    'picard': ['.dict'],
+    'samtools': ['.fasta.fai']
+}
+INDEX_SUFFIXES = flatten(INDICES.values())
 # }}}}
 
 # ==============================================================================
@@ -81,6 +90,8 @@ def get_iterations_reads(wildcards):
     if wildcards.iter == '_reduced':
         read_dir = os.path.join('output', 'filter_contamination_reduced')
         outdict['fwd_reads'] = os.path.join(read_dir, smp + '.R1.fastq.gz')
+        index = match_reduced_assembly_index,
+
         outdict['rev_reads'] = os.path.join(read_dir, smp + '.R2.fastq.gz')
         outdict['unpaired_reads'] = os.path.join(read_dir,
                                                  smp + '.unpaired.fastq.gz')
@@ -98,6 +109,14 @@ def get_iterations_reads(wildcards):
         outdict['unpaired_reads'] = os.path.join(read_dir, smp +
                                                  '.unpaired.fastq.gz')
     return outdict
+
+
+def index_assembly(assembly):
+    index_prefix = os.path.splitext(assembly)[0]
+    picard_dict = index_prefix + '.dict'
+    shell(' '.join(['bowtie2-build', assembly, index_prefix]))
+    shell(' '.join(['samtools', 'faidx', assembly]))
+    shell('picard CreateSequenceDictionary R=' + assembly + ' O=' + picard_dict)
 
 
 def get_assembly_bams_from_genotype(wildcards):
@@ -141,7 +160,10 @@ def get_genotype_for_sample(wildcards):
 
 def get_starting_control(wildcards):
     """Given a sample ID, return the ID of its starting control"""
-    return wildcards.sample[0:2] + "SC"
+    try:
+        return wildcards.sample[0:2] + "SC"
+    except AttributeError:
+        return wildcards.genotype + 'SC'
 
 
 def match_assembly(wildcards):
@@ -153,6 +175,15 @@ def match_assembly(wildcards):
     return assembly
 
 
+def match_assembly_index(wildcards):
+    """Given the sample, return the starting control assembly bowtie2 index"""
+    starting_control = get_starting_control(wildcards)
+    indices = [os.path.join("output", "length_filter_assembly" + wildcards.iter,
+                            starting_control + suffix)
+               for suffix in INDEX_SUFFIXES]
+    return indices
+
+
 def match_reduced_assembly(wildcards):
     '''Given the sample, return the redundans reduced assembly'''
     starting_control = get_starting_control(wildcards)
@@ -162,22 +193,42 @@ def match_reduced_assembly(wildcards):
     return assembly
 
 
-def match_assembly_index(wildcards):
-    """Given the sample, return the starting control assembly bowtie2 index"""
-    starting_control = get_starting_control(wildcards)
-    return os.path.join("output",
-                        "length_filter_assembly" + wildcards.iter,
-                        starting_control + ".1.bt2")
-
-
 def match_reduced_assembly_index(wildcards):
     """Given the sample, return the redundans reduced ssembly bowtie2 index"""
     starting_control = get_starting_control(wildcards)
-    index = os.path.join("output",
-                         "length_filter_assembly_reduced",
-                         starting_control + ".1.bt2")
-    return index
+    indices = [os.path.join("output", "length_filter_assembly_reduced",
+               starting_control + suffix)
+               for suffix in INDEX_SUFFIXES + ['.nix']]
+    return indices
 
+
+def match_qc_assembly(wildcards):
+    """Given the sample, return the starting control assembly"""
+    starting_control = get_starting_control(wildcards)
+    if wildcards.iter == '_reduced':
+        assembly = os.path.join("output",
+                                "qc_length_filter",
+                                starting_control + ".fasta")
+    else:
+        assembly = os.path.join("output",
+                                "length_filter_assembly" + wildcards.iter,
+                                starting_control + ".fasta")
+    return assembly
+
+
+def match_qc_assembly_index(wildcards):
+    """Given the sample, return the starting control assembly bowtie2 index"""
+    starting_control = get_starting_control(wildcards)
+    if wildcards.iter == '_reduced':
+        indices = [os.path.join("output", "qc_length_filter",
+                                starting_control + suffix)
+                   for suffix in INDEX_SUFFIXES]
+    else:
+        indices = [os.path.join("output", "length_filter_assembly" + wildcards.iter,
+                                starting_control + suffix)
+                   for suffix in INDEX_SUFFIXES]
+
+    return indices
 
 def get_bowtie2_idx_root(index):
     """Given the path to a forward bowtie2 index, return its root name"""
@@ -359,19 +410,14 @@ rule index_length_filtered_assembly:
     input:
         'output/length_filter_assembly{iter}/{genotype}SC.fasta'
     output:
-        bt2 = 'output/length_filter_assembly{iter}/{genotype}SC.1.bt2',
-        fai = 'output/length_filter_assembly{iter}/{genotype}SC.fasta.fai',
-        picard = 'output/length_filter_assembly{iter}/{genotype}SC.dict'
-    params:
-        output_prefix = 'output/length_filter_assembly{iter}/{genotype}SC'
-    shell:
-        'bowtie2-build {input} {params.output_prefix} & '
-        'samtools faidx {input} & '
-        'picard CreateSequenceDictionary R={input} O={output.picard}'
+        ['output/length_filter_assembly{iter}/{genotype}SC' +
+         suffix for suffix in INDEX_SUFFIXES]
+    run:
+        index_assembly(input[0])
 
 rule blast_assembly:
     input:
-        'output/length_filter_assembly{iter}/{genotype}SC.fasta'
+        match_qc_assembly
     output:
         "output/blast_assembly{iter}/{genotype}SC.tsv"
     threads: 10
@@ -387,8 +433,8 @@ rule blast_assembly:
 
 rule diamond_blast_assembly:
     input:
-        assembly = 'output/length_filter_assembly{iter}/{genotype}SC.fasta',
-        db = "output/build_diamond_database/uniprot_ref_proteomes.dmnd",
+        assembly = match_qc_assembly,
+        db = "output/build_diamond_database/uniprot_ref_proteomes.dmnd"
     output:
         "output/diamond_blast_assembly{iter}/{genotype}SC.out"
     params:
@@ -430,7 +476,7 @@ rule align_to_assembly:
     log:
         "output/align_to_assembly{iter}/log/{sample}.log"
     run:
-        index_prefix = get_bowtie2_idx_root(input.index)
+        index_prefix = get_bowtie2_idx_root(input.index[0])
         shell('bowtie2 -1 {input.fwd_reads} -2 {input.rev_reads} '
               '-U {input.unpaired_reads} -X {params.max_insert} '
               '-x ' + index_prefix + ' --rg-id={wildcards.sample} '
@@ -459,7 +505,7 @@ rule convert_alignment_to_cov:
 
 rule init_blobtools_database:
     input:
-        assembly = "output/length_filter_assembly{iter}/{genotype}SC.fasta",
+        assembly = match_qc_assembly,
         blast_hits = "output/blast_assembly{iter}/{genotype}SC.tsv",
         diamond_hits = ('output/diamond_blast_assembly{iter}/{genotype}SC.'
                         'taxified.out'),
@@ -601,10 +647,13 @@ rule redundans:
     input:
         fwd_reads = 'output/filter_contamination2/{genotype}SC.R1.fastq.gz',
         rev_reads = 'output/filter_contamination2/{genotype}SC.R2.fastq.gz',
+        unpaired_reads = (
+            'output/filter_contamination2/{genotype}SC.unpaired.fastq.gz'),
         assembly = 'output/assembly3/{genotype}SC.fasta'
     output:
         fasta = 'output/redundans/{genotype}SC.fasta',
-        index = 'output/redundans/{genotype}SC.1.bt2'
+        index = ['output/redundans/{genotype}SC' + suffix
+                 for suffix in INDEX_SUFFIXES]
     params:
         outdir = 'output/redundans/{genotype}'
     threads: 16
@@ -615,14 +664,13 @@ rule redundans:
     run:
         shell('rm -rf {params.outdir}')
         shell('python2 {config[redundans_bin]} -v -f {input.assembly} '
-              '-i {input.fwd_reads} {input.rev_reads} -o {params.outdir} '
-              '-r {config[nuclear_reference]} --norearrangements -t {threads} '
-              '2> {log}')
+              '-i {input.fwd_reads} {input.rev_reads} {input.unpaired_reads} '
+              '-o {params.outdir} '
+              '-r {config[nuclear_reference]} '
+              '-t {threads} '
+              '--usebwa 2> {log}')
         shell('mv {params.outdir}/scaffolds.reduced.fa {output.fasta}')
-        shell('samtools faidx {output.fasta}')
-        index_prefix = os.path.splitext(output.fasta)[0]
-        shell('bowtie2-build {output.fasta} ' + index_prefix)
-
+        index_assembly(output.fasta)
 
 rule blast_against_mitochondria:
     input:
@@ -650,40 +698,6 @@ rule filter_mitochondrial_scaffolds:
         '--assembly {input.assembly} --outfasta {output.fasta} '
         '--outtxt {output.txt}'
 
-rule repeatmasker:
-    input:
-        'output/filter_mitochondrial_scaffolds/{genotype}SC.fasta'
-    output:
-        masked = 'output/repeatmasker/{genotype}.fasta',
-        out = 'output/repeatmasker/{genotype}.out'
-    threads: 8
-    run:
-        shell('RepeatMasker '
-        '-lib config[repeat_library]'
-        '-s -par {threads} {input}')
-        input_dir = local.path(input).dirname
-        output_dir = local.path(output.masked).dirname
-        tmp_outputs = [input_dir / (wildcards.sample + suffix)
-                       for suffix in ['.masked', '.out']]
-        for tmp, final in zip(tmp_outputs, output):
-            tmp.move(final)
-
-
-rule index_reduced_assembly:
-    input:
-        'output/repeatmasker/{genotype}SC.fasta'
-    output:
-        bt2 = 'output/repeatmasker/{genotype}SC.1.bt2',
-        picard = 'output/repeatmasker/{genotype}SC.dict',
-        fai = 'output/repeatmasker/{genotype}SC.fasta.fai'
-    params:
-        output_prefix = "output/repeatmasker/{genotype}SC"
-    shell:
-        "bowtie2-build {input} {params.output_prefix} && "
-        "samtools faidx {input} && "
-        "picard CreateSequenceDictionary R={input} O={output.picard}"
-
-
 rule preliminary_alignment_to_reduced:
     input:
         fwd_reads = 'output/filter_contamination2/{sample}.R1.fastq.gz',
@@ -693,7 +707,8 @@ rule preliminary_alignment_to_reduced:
         assembly = lambda wildcards: (
             'output/redundans/' + wildcards.sample[0:2] + 'SC.fasta'),
         index = lambda wildcards: (
-            'output/redundans/' + wildcards.sample[0:2] + 'SC.1.bt2')
+            ['output/redundans/' + wildcards.sample[0:2] + 'SC' + suffix
+             for suffix in INDEX_SUFFIXES])
     output:
         bam = 'output/preliminary_alignment_to_reduced/{sample}.bam',
         bai = 'output/preliminary_alignment_to_reduced/{sample}.bam.bai'
@@ -705,7 +720,7 @@ rule preliminary_alignment_to_reduced:
     log:
         "output/preliminary_alignment_to_reduced/log/{sample}.log"
     run:
-        index_prefix = get_bowtie2_idx_root(input.index)
+        index_prefix = get_bowtie2_idx_root(input.index[0])
         shell('bowtie2 -1 {input.fwd_reads} -2 {input.rev_reads} '
               '-U {input.unpaired_reads} -X {params.max_insert} '
               '-x ' + index_prefix + ' --rg-id={wildcards.sample} '
@@ -714,6 +729,83 @@ rule preliminary_alignment_to_reduced:
               'samtools sort - > {output.bam} 2> {log}')
         shell('samtools index {output.bam}')
 
+
+# This copy of assembly is just used for quality metrics since we don't want
+# to do QC summaries on the masked copies.
+rule qc_length_filter:
+    input:
+        'output/filter_mitochondrial_scaffolds/{genotype}SC.fasta'
+    output:
+        fasta = 'output/qc_length_filter/{genotype}SC.fasta',
+        index = ['output/qc_length_filter/{genotype}SC' + suffix
+                 for suffix in INDEX_SUFFIXES]
+    params:
+        minlen = 1000
+    run:
+        shell("length_filter_fasta.pl {params.minlen} {input} > {output.fasta}")
+        index_assembly(output.fasta)
+
+rule repeatmasker:
+    input:
+        'output/filter_mitochondrial_scaffolds/{genotype}SC.fasta'
+    output:
+        masked = 'output/repeatmasker/{genotype}.fasta',
+        out = 'output/repeatmasker/{genotype}.out'
+    threads: 8
+    run:
+        shell('RepeatMasker '
+        '-lib {config[repeat_library]} '
+        '-s -par {threads} {input}')
+        input_dir = local.path(input).dirname
+        output_dir = local.path(output.masked).dirname
+        tmp_outputs = [input_dir / (wildcards.genotype + 'SC' + suffix)
+                       for suffix in ['.fasta.masked', '.fasta.out']]
+        for tmp, final in zip(tmp_outputs, output):
+            tmp.move(final)
+
+rule index_reduced_assembly:
+    input:
+        'output/repeatmasker/{genotype}SC.fasta'
+    output:
+        indices = (['output/repeatmasker/{genotype}SC' + suffix
+                    for suffix in INDEX_SUFFIXES])
+    run:
+        index_assembly(input[0])
+
+# }}}
+
+# ==============================================================================
+# Final alignment
+# ==============================================================================
+# {{{
+rule novoalign_index_assembly:
+    input:
+        'output/length_filter_assembly_reduced/{genotype}SC.fasta'
+    output:
+        'output/length_filter_assembly_reduced/{genotype}SC.nix'
+    shell:
+        'novoindex {output} {input}'
+
+rule align_to_reduced_assembly:
+    input:
+        assembly = match_reduced_assembly,
+        index = match_reduced_assembly_index,
+        fwd_reads = 'output/filter_contamination_reduced/{sample}.R1.fastq.gz',
+        rev_reads = 'output/filter_contamination_reduced/{sample}.R2.fastq.gz',
+        unpaired_reads = ('output/filter_contamination_reduced/{sample}.unpaired.fastq.gz')
+    output:
+        bam = 'output/align_to_reduced_assembly/{sample}.bam',
+        bai = 'output/align_to_reduced_assembly/{sample}.bam.bai'
+    log:
+        'output/align_to_reduced_assembly/log/{sample}.log'
+    run:
+        shell('novoalign '
+              '-f {input.fwd_reads} {input.rev_reads} '
+              '-d {input.assembly} '
+              '-o SAM | '
+              'samtools view -bh - | '
+              'samtools sort - > {output.bam} 2> {log}')
+        shell('samtools index {output.bam}')
 
 # }}}
 
@@ -724,8 +816,8 @@ rule preliminary_alignment_to_reduced:
 
 rule mark_duplicates:
     input:
-        bam = 'output/align_to_assembly_reduced/{sample}.bam',
-        bai = 'output/align_to_assembly_reduced/{sample}.bam.bai'
+        bam = 'output/align_to_reduced_assembly/{sample}.bam',
+        bai = 'output/align_to_reduced_assembly/{sample}.bam.bai'
     output:
         bam = 'output/mark_duplicates/{sample}.bam',
         bai = 'output/mark_duplicates/{sample}.bam.bai'
@@ -771,7 +863,6 @@ rule call_variants:
         '--output-mode EMIT_ALL_SITES '
         '--indel-heterozygosity {params.indel_heterozygosity} '
 
-
 rule genotype_gvcfs:
     input:
         gvcf = 'output/call_variants{iter}/{sample}.g.vcf',
@@ -789,7 +880,6 @@ rule genotype_gvcfs:
         '-O {output} '
         '--heterozygosity {params.snp_heterozygosity} '
         '--indel-heterozygosity {params.indel_heterozygosity} '
-
 
 rule extract_variant_coverage:
     input:
@@ -861,7 +951,6 @@ rule exclude_nonvariants:
         '-O {output.table} '
         '-F CHROM -F POS -GF GT -F QUAL -F MQ -F DP -F TRANSTION -GF AD '
         '-F "HOM-REF" -F "HOM-VAR" -F TYPE'
-
 
 rule extract_variant_quality_scores:
     input:
@@ -997,7 +1086,6 @@ rule remove_filtered_variants:
         '--exclude-filtered '
         '--exclude-non-variants'
 
-
 rule vcf_to_tab:
     input:
         vcf = 'output/remove_filtered_variants{iter}/{sample}.{type}.vcf',
@@ -1084,10 +1172,13 @@ rule clean_fastqc:
         "fastqc -o {params.outdir} {input.fwd_reads} {input.rev_reads} "
         "{input.merged_reads}"
 
+
+
 rule quast:
     input:
         unpack(get_iterations_reads),
-        assembly = 'output/length_filter_assembly{iter}/{genotype}SC.fasta',
+        assembly = match_qc_assembly,
+        index = match_qc_assembly_index
     output:
         'output/quast{iter}/{genotype}/report.html'
     threads: 6
@@ -1099,10 +1190,22 @@ rule quast:
         "quast.py -o {params.outdir} --eukaryote -1 {input.fwd_reads} "
         "-2 {input.rev_reads} -t {threads} --no-snps {input.assembly}"
 
-rule busco:
-    input: 'output/length_filter_assembly{iter}/{genotype}SC.fasta'
-    output: 'output/busco{iter}/{genotype}/short_summary_{genotype}.txt'
+
+rule qualimap:
+    input:
+        'output/align_to_assembly_reduced/{sample}.bam'
+    output:
+        'output/qualimap/{sample}/genome_results.txt'
     threads: 8
+    run:
+        shell("qualimap bamqc -nt 8 -bam {input.assembly} "
+              "-outdir output/qualimap/" + wildcards.sample)
+
+rule busco:
+    input:
+        assembly = match_qc_assembly,
+        index = match_qc_assembly_index
+    output: 'output/busco{iter}/{genotype}/short_summary_{genotype}.txt'
     params:
         outdir = 'output/busco{iter}/{genotype}'
     run:
@@ -1116,17 +1219,15 @@ rule busco:
         local.env['PATH'] = ':'.join([
             local.path(config['augustus_scripts']), local.env['PATH']
         ])
-        assembly = local.path(input)
+        assembly = local.path(input.assembly)
         lineage_file = local.path(config['busco_database'])
         tmp_outdir = outdir_root / ('run_' + wildcards.genotype)
 
         with local.cwd(outdir_root):
             busco['-i', assembly, '-o', wildcards.genotype, '-l', lineage_file,
-            '-m', 'geno', '-f', '--cpu', threads, '-e', params.evalue] & FG
-
+            '-m', 'geno', '-f'] & FG
             for f in tmp_outdir.list():
                 f.move(outdir)
-
             tmp_outdir.delete()
 
 rule multiqc:
@@ -1143,7 +1244,8 @@ rule multiqc:
         expand('output/busco{iter}/{genotype}/short_summary_{genotype}.txt',
                iter=ALL_FILTER_ITER, genotype=GENOTYPE),
         expand('output/mark_duplicates/{sample}.bam', sample=SAMPLE),
-        expand('output/align_to_assembly_reduced/{sample}.bam', sample=SAMPLE)
+        expand('output/align_to_assembly_reduced/{sample}.bam', sample=SAMPLE),
+        expand('output/qualimap/{sample}/genome_results.txt', sample=SAMPLE)
     output: 'output/multiqc/multiqc.html'
     shell:
         'multiqc -f -d -n {output} .'
