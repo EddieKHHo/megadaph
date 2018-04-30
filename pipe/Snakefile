@@ -11,7 +11,6 @@ from plumbum import (
     local,
 )
 from plumbum.cmd import (
-    blobtools,
     busco,
     cat,
 )
@@ -86,19 +85,20 @@ def match_reads(wildcards):
     except AttributeError:
         smp = wildcards.genotype + 'SC'
     outdict = {}
-    read_dir = local.path('output')
+    read_dir = 'output'
     if wildcards.iter in ['_unmasked', '_masked', '_ref']:
-        read_dir = read_dir / 'filter_contamination_reduced'
+        read_dir = os.path.join(read_dir, 'filter_contamination_reduced')
     elif wildcards.iter == '_reduced':
-        read_dir = read_dir / 'filter_contamination2'
+        read_dir = os.path.join(read_dir, 'filter_contamination2')
     elif int(wildcards.iter) == 1:
-        read_dir = read_dir / 'quality_trim'
+        read_dir = os.path.join(read_dir, 'quality_trim')
     else:
         prev_iter = str(int(wildcards.iter) - 1)
-        read_dir = read_dir / ('filter_contamination' + prev_iter)
-    outdict['fwd_reads'] = str(read_dir / (smp + '.R1.fastq.gz'))
-    outdict['rev_reads'] = str(read_dir / (smp + '.R2.fastq.gz'))
-    outdict['unpaired_reads'] = str(read_dir / (smp + '.unpaired.fastq.gz'))
+        read_dir = os.path.join(read_dir, 'filter_contamination' + prev_iter)
+    outdict['fwd_reads'] = os.path.join(read_dir, smp + '.R1.fastq.gz')
+    outdict['rev_reads'] = os.path.join(read_dir, smp + '.R2.fastq.gz')
+    outdict['unpaired_reads'] = os.path.join(
+            read_dir, smp + '.unpaired.fastq.gz')
     return outdict
 
 
@@ -118,11 +118,11 @@ def match_filter_alignment(wildcards):
     smp = get_sample(wildcards)
     outdict = dict()
     if wildcards.iter in ['_reduced', '_masked', '_unmasked']:
-        dir = local.path('output') / 'align_to_assembly_reduced'
+        dir = os.path.join('output', 'align_to_assembly_reduced')
     else:
-        dir = local.path('output') / ('align_to_assembly' + wildcards.iter)
-    outdict['bam'] = str(dir / (smp + '.bam'))
-    outdict['bai'] = str(dir / (smp + '.bam.bai'))
+        dir = os.path.join('output', 'align_to_assembly' + wildcards.iter)
+    outdict['bam'] = os.path.join(dir, smp + '.bam')
+    outdict['bai'] = os.path.join(dir, smp + '.bam.bai')
     return outdict
 
 
@@ -244,7 +244,6 @@ rule index_fasta:
         shell('picard CreateSequenceDictionary R=' + input.fasta +
               ' O=' + picard_dict)
         shell('bwa index {input}')
-
 
 rule align_to_assembly:
     input:
@@ -627,7 +626,8 @@ rule generate_inclusion_list:
     input:
         unpack(match_filter_alignment),
         exclusions = lambda wildcards: (
-            'output/find_mitochondrial_scaffolds/{genotype}.txt'
+            os.path.join('output/find_mitochondrial_scaffolds',
+                         wildcards.genotype + '.txt')
             if wildcards.iter == '_reduced'
             else ''.join(['output/find_contam_contigs', wildcards.iter,
                           '/{genotype}.txt']))
