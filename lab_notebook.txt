@@ -830,3 +830,20 @@ April 11th, 2018
   that its memory related. So I'll try again with a 200 Gb allocation.
 
 
+================================================================================
+April 11th-25th, 2018
+================================================================================
+- Redundans maintainer recommended I upgrade my redundans version and try the
+  use-bwa parameter.
+- Initial results indicate that this solved the issue. Redundans is still
+  running for a few samples but the majority succeeded very quickly.
+- Followed the afforementioned GATK guide and called an initial set of indels
+  and snps. Also implemented a filter to remove all variants present in multiple
+  samples.
+- This protocol proved to be way too permissive as we ended up with ~200000
+  variants after filtering.
+- Misalignments due to repetitive sequences are the most likely cause of this.
+  I added a repeat masking step to the pipeline using Emily's repeat library.
+  Apparently bowtie2 has a long standing bug when aligning to masked sequences,
+  so I also decided to switch to Novoalign for the final alignment step. This
+  will probably also increase alignment accuracy in non-repetitive sequences.
