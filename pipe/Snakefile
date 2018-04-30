@@ -1,9 +1,6 @@
 """Megadaph Variant Calling Pipeline"""
+
 import os
-from shutil import (
-    move,
-    rmtree,
-)
 from tempfile import NamedTemporaryFile
 from uuid import uuid4
 
@@ -14,6 +11,7 @@ from plumbum import (
     local,
 )
 from plumbum.cmd import (
+    blobtools,
     busco,
     cat,
 )
@@ -31,18 +29,18 @@ SAMPLE, PAIR = glob_wildcards(
 # Remove duplicate entries
 SAMPLE = sorted(list(set(SAMPLE)))
 
-SAMPLE = [x for x in SAMPLE if "FA" not in x]
-SAMPLE = [x for x in SAMPLE if "GB" not in x]
+# SAMPLE = [x for x in SAMPLE if "FA" not in x]
+# SAMPLE = [x for x in SAMPLE if "GB" not in x]
 # SAMPLE = [x for x in SAMPLE if "GC" not in x]
 # SAMPLE = [x for x in SAMPLE if "IA" not in x]
-SAMPLE = [x for x in SAMPLE if "IC" not in x]
+# SAMPLE = [x for x in SAMPLE if "IC" not in x]
 
 # Genotype indices given by first two letters of sample name
 GENOTYPE = list(set([x[0:2] for x in SAMPLE]))
 
-GENOTYPE_SAMPLE = {}
+GENOTYPE_TO_SAMPLE = {}
 for genotype in GENOTYPE:
-    GENOTYPE_SAMPLE[genotype] = [x for x in SAMPLE if x.startswith(genotype)]
+    GENOTYPE_TO_SAMPLE[genotype] = [x for x in SAMPLE if x.startswith(genotype)]
 
 # Decontamination was done in several iterations, with each iteration consisting
 # of:
@@ -51,8 +49,10 @@ for genotype in GENOTYPE:
 # 3. Contamination filtering
 # Outputs from contamination were reassembled. This was continued until minimal
 # contamination was evident in blobplots
-ALL_FILTER_ITER = ['1', '2', '3', '_reduced']
-DECONTAM_ITER = ['1', '2']
+PLOT_ITER = ['1', '2', '_unmasked']
+DECONTAM_ITER = ['1', '2', '_reduced']
+ASSEMBLY_ITER = ['1', '2', '3']
+
 
 # Variant calling was also done iteratively.
 # In the first step, variants with default parameters and high confidence
@@ -64,13 +64,14 @@ CALL_ITER = ['_initial']
 VARIANT_TYPES = ['snps', 'indels', 'other']
 
 # Suffixes for various types of fasta indices
-INDICES = {
+FASTA_INDICES = {
     'bowtie2': ['.1.bt2', '.2.bt2', '.3.bt2', '.4.bt2', '.rev.1.bt2',
                 '.rev.2.bt2'],
     'picard': ['.dict'],
-    'samtools': ['.fasta.fai']
+    'samtools': ['.fasta.fai'],
+    'bwa': ['.fasta.amb', '.fasta.ann', '.fasta.bwt', '.fasta.pac', '.fasta.sa']
 }
-INDEX_SUFFIXES = flatten(INDICES.values())
+INDEX_SUFFIXES = flatten(FASTA_INDICES.values())
 # }}}}
 
 # ==============================================================================
@@ -78,175 +79,93 @@ INDEX_SUFFIXES = flatten(INDICES.values())
 # ==============================================================================
 # {{{
 
-
-def get_iterations_reads(wildcards):
-    """Get the current set of reads which have passed filtering"""
+def match_reads(wildcards):
+    """Match reads to the current wildcards."""
     try:
         smp = wildcards.sample
     except AttributeError:
         smp = wildcards.genotype + 'SC'
-
     outdict = {}
-    if wildcards.iter == '_reduced':
-        read_dir = os.path.join('output', 'filter_contamination_reduced')
-        outdict['fwd_reads'] = os.path.join(read_dir, smp + '.R1.fastq.gz')
-        index = match_reduced_assembly_index,
-
-        outdict['rev_reads'] = os.path.join(read_dir, smp + '.R2.fastq.gz')
-        outdict['unpaired_reads'] = os.path.join(read_dir,
-                                                 smp + '.unpaired.fastq.gz')
+    read_dir = local.path('output')
+    if wildcards.iter in ['_unmasked', '_masked', '_ref']:
+        read_dir = read_dir / 'filter_contamination_reduced'
+    elif wildcards.iter == '_reduced':
+        read_dir = read_dir / 'filter_contamination2'
     elif int(wildcards.iter) == 1:
-        read_dir = os.path.join('output', 'quality_trim')
-        outdict['fwd_reads'] = os.path.join(read_dir, smp + '.R1.fastq.gz')
-        outdict['rev_reads'] = os.path.join(read_dir, smp + '.R2.fastq.gz')
-        outdict['unpaired_reads'] = os.path.join(read_dir, smp +
-                                                 '.merged.fastq.gz')
+        read_dir = read_dir / 'quality_trim'
     else:
         prev_iter = str(int(wildcards.iter) - 1)
-        read_dir = os.path.join('output', 'filter_contamination' + prev_iter)
-        outdict['fwd_reads'] = os.path.join(read_dir, smp + '.R1.fastq.gz')
-        outdict['rev_reads'] = os.path.join(read_dir, smp + '.R2.fastq.gz')
-        outdict['unpaired_reads'] = os.path.join(read_dir, smp +
-                                                 '.unpaired.fastq.gz')
+        read_dir = read_dir / ('filter_contamination' + prev_iter)
+    outdict['fwd_reads'] = str(read_dir / (smp + '.R1.fastq.gz'))
+    outdict['rev_reads'] = str(read_dir / (smp + '.R2.fastq.gz'))
+    outdict['unpaired_reads'] = str(read_dir / (smp + '.unpaired.fastq.gz'))
     return outdict
 
 
-def index_assembly(assembly):
-    index_prefix = os.path.splitext(assembly)[0]
-    picard_dict = index_prefix + '.dict'
-    shell(' '.join(['bowtie2-build', assembly, index_prefix]))
-    shell(' '.join(['samtools', 'faidx', assembly]))
-    shell('picard CreateSequenceDictionary R=' + assembly + ' O=' + picard_dict)
+def get_sample(wildcards):
+    """Get the sample from the wildcards.
 
-
-def get_assembly_bams_from_genotype(wildcards):
-    sample_names = get_samples_for_genotype(wildcards)
-    bam_files = [''.join(["output/align_to_assembly", wildcards.iter, "/",
-                          x, ".bam"])
-                 for x in sample_names]
-    return bam_files
-
-
-def get_assembly_covfiles_from_genotype(wildcards):
-    sample_names = get_samples_for_genotype(wildcards)
-    cov_files = [''.join(["output/convert_alignment_to_cov", wildcards.iter,
-                          "/", x, ".bam.cov"])
-                 for x in sample_names]
-    return cov_files
-
-
-def get_filter_alignment(wildcards):
+    Return the starting control if wildcards.sample doesn't exist.
+    """
     try:
-        smp = wildcards.sample
-    except AttributeError:
-        smp = wildcards.genotype + 'SC'
-
-    if wildcards.iter == '_reduced':
-        bam = ''.join(['output/preliminary_alignment_to_reduced/',
-                       smp, '.bam'])
-    else:
-        bam = ''.join(['output/align_to_assembly', wildcards.iter, '/',
-                       smp, '.bam'])
-    return bam
-
-
-def get_samples_for_genotype(wildcards):
-    return [x for x in SAMPLE if x.startswith(wildcards.genotype)]
-
-
-def get_genotype_for_sample(wildcards):
-    return ''.join(wildcards.sample[0:2])
-
-
-def get_starting_control(wildcards):
-    """Given a sample ID, return the ID of its starting control"""
-    try:
-        return wildcards.sample[0:2] + "SC"
+        return wildcards.sample
     except AttributeError:
         return wildcards.genotype + 'SC'
 
 
+def match_filter_alignment(wildcards):
+    """Get an alignment which is targeted for contamination filtering."""
+    smp = get_sample(wildcards)
+    outdict = dict()
+    if wildcards.iter in ['_reduced', '_masked', '_unmasked']:
+        dir = local.path('output') / 'align_to_assembly_reduced'
+    else:
+        dir = local.path('output') / ('align_to_assembly' + wildcards.iter)
+    outdict['bam'] = str(dir / (smp + '.bam'))
+    outdict['bai'] = str(dir / (smp + '.bam.bai'))
+    return outdict
+
+
+def get_genotype(wildcards):
+    """Get the genotype from the wildcards."""
+    try:
+        return wildcards.genotype
+    except AttributeError:
+        return ''.join(wildcards.sample[0:2])
+
+
+def get_starting_control(wildcards):
+    """Get the starting control from the wildcards."""
+    return get_genotype(wildcards) + 'SC'
+
+
 def match_assembly(wildcards):
-    """Given the sample, return the starting control assembly"""
+    """Match the current assembly and indices to the wildcards."""
+    outdict = dict()
+    if hasattr(wildcards, 'iter'):
+        if wildcards.iter == '_ref':
+            outdict['assembly'] = config['nuclear_reference']
+            prefix = os.path.splitext(outdict['assembly'])[0]
+            dir = local.path(outdict['assembly']).dirname
+            outdict['indices'] = [
+                str(dir / (prefix + suffix)) for suffix in INDEX_SUFFIXES]
+            return outdict
+
     starting_control = get_starting_control(wildcards)
-    assembly = os.path.join("output",
-                            "length_filter_assembly" + wildcards.iter,
-                            starting_control + ".fasta")
-    return assembly
-
-
-def match_assembly_index(wildcards):
-    """Given the sample, return the starting control assembly bowtie2 index"""
-    starting_control = get_starting_control(wildcards)
-    indices = [os.path.join("output", "length_filter_assembly" + wildcards.iter,
-                            starting_control + suffix)
-               for suffix in INDEX_SUFFIXES]
-    return indices
-
-
-def match_reduced_assembly(wildcards):
-    '''Given the sample, return the redundans reduced assembly'''
-    starting_control = get_starting_control(wildcards)
-    assembly = os.path.join("output",
-                            "length_filter_assembly_reduced",
-                            starting_control + ".fasta")
-    return assembly
-
-
-def match_reduced_assembly_index(wildcards):
-    """Given the sample, return the redundans reduced ssembly bowtie2 index"""
-    starting_control = get_starting_control(wildcards)
-    indices = [os.path.join("output", "length_filter_assembly_reduced",
-               starting_control + suffix)
-               for suffix in INDEX_SUFFIXES + ['.nix']]
-    return indices
-
-
-def match_qc_assembly(wildcards):
-    """Given the sample, return the starting control assembly"""
-    starting_control = get_starting_control(wildcards)
-    if wildcards.iter == '_reduced':
-        assembly = os.path.join("output",
-                                "qc_length_filter",
-                                starting_control + ".fasta")
+    if hasattr(wildcards, 'call') or hasattr(wildcards, 'vartype'):
+        dir = local.path('output') / ('repeatmasker')
+    elif wildcards.iter in ['_masked', '_unmasked']:
+        dir = local.path('output') / 'length_filter_assembly_reduced'
     else:
-        assembly = os.path.join("output",
-                                "length_filter_assembly" + wildcards.iter,
-                                starting_control + ".fasta")
-    return assembly
-
-
-def match_qc_assembly_index(wildcards):
-    """Given the sample, return the starting control assembly bowtie2 index"""
-    starting_control = get_starting_control(wildcards)
-    if wildcards.iter == '_reduced':
-        indices = [os.path.join("output", "qc_length_filter",
-                                starting_control + suffix)
-                   for suffix in INDEX_SUFFIXES]
-    else:
-        indices = [os.path.join("output", "length_filter_assembly" + wildcards.iter,
-                                starting_control + suffix)
-                   for suffix in INDEX_SUFFIXES]
-
-    return indices
-
-def get_bowtie2_idx_root(index):
-    """Given the path to a forward bowtie2 index, return its root name"""
-    return os.path.splitext(os.path.splitext(index)[0])[0]
-
-
-def get_exclusions(wildcards):
-    '''Get the list of exclusions for a decontamination iteration'''
-    if wildcards.iter == '_reduced':
-        exclusions = ''.join(['output/filter_mitochondrial_scaffolds/',
-                              wildcards.genotype, 'SC.txt'])
-    else:
-        exclusions = ''.join(['output/find_contam_contigs', wildcards.iter,
-                              '/', wildcards.genotype, '.txt'])
-    return exclusions
+        dir = local.path('output') / ('length_filter_assembly' + wildcards.iter)
+    outdict['assembly'] = str(dir / (starting_control + '.fasta'))
+    outdict['indices'] = [str(dir / (starting_control + suffix)) for suffix in
+                          INDEX_SUFFIXES]
+    return outdict
 
 
 def build_filter_expression(parameters):
+    """Given a set of filter conditions, build a GATK filter expression."""
     param_list = []
     for key, value in parameters.items():
         if not isinstance(parameters[key], str):
@@ -256,6 +175,14 @@ def build_filter_expression(parameters):
             param_list.append(' '.join([key, value]))
     filter_expression = '"' + ' || '.join(param_list) + '"'
     return filter_expression
+
+
+def clear_directory(dir):
+    """Delete the contents of a directory."""
+    dir = local.path(dir)
+    dir.delete()
+    dir.mkdir()
+
 # }}}
 
 # ==============================================================================
@@ -267,22 +194,107 @@ rule all:
         'output/multiqc/multiqc.html',
         expand("output/produce_blobplots{iter}/{genotype}/family/{genotype}."
                "bestsum.family.p20.span.100.blobplot.cov0.png",
-               genotype=GENOTYPE, iter=ALL_FILTER_ITER),
+               genotype=GENOTYPE, iter=PLOT_ITER),
         expand("output/produce_covplots{iter}/{sample}.covsum.png",
-               sample=SAMPLE, iter=ALL_FILTER_ITER),
-        expand("output/find_contam_contigs{iter}/{genotype}.txt",
-               iter=DECONTAM_ITER, genotype=GENOTYPE),
-        expand('output/blast_against_mitochondria/{genotype}.tsv',
-               genotype=GENOTYPE),
-        expand('output/extract_variant_quality_scores{iter}/{sample}.{type}.table',
-               iter=CALL_ITER, sample=SAMPLE, type=VARIANT_TYPES),
-        expand('output/plot_variant_quality_scores{iter}/{sample}.svg',
-               sample=SAMPLE, iter=CALL_ITER),
-        expand('output/calc_number_filtered_sites{iter}/{sample}.{type}.txt',
-                iter=CALL_ITER, sample=SAMPLE, type=VARIANT_TYPES),
-        expand('output/select_unique_variants{iter}/{sample}.{type}.table',
-                sample=SAMPLE, iter=CALL_ITER, type=VARIANT_TYPES)
+               sample=SAMPLE, iter=PLOT_ITER),
+        expand('output/plot_variant_quality_scores{call}/{sample}.svg',
+               sample=SAMPLE, call=CALL_ITER),
+        expand('output/calc_number_filtered_sites{call}/{sample}.{type}.txt',
+               call=CALL_ITER, sample=SAMPLE, type=VARIANT_TYPES),
+        expand('output/select_unique_variants{call}/{sample}.{type}.table',
+               sample=SAMPLE, call=CALL_ITER, type=VARIANT_TYPES)
         # }}}
+
+
+# ==============================================================================
+# Utility Rules
+# ==============================================================================
+# {{{
+rule index_bam:
+    input:
+        'output/{dir}/{group}.bam'
+    output:
+        'output/{dir}/{group}.bam.bai'
+    shell:
+        'samtools index {input}'
+
+
+rule index_fasta:
+    input:
+        fasta = 'output/{dir}/{group}.fasta'
+    output:
+        'output/{dir}/{group}.fasta.fai',
+        'output/{dir}/{group}.rev.2.bt2',
+        'output/{dir}/{group}.fasta.amb',
+        'output/{dir}/{group}.dict',
+        'output/{dir}/{group}.3.bt2',
+        'output/{dir}/{group}.rev.1.bt2',
+        'output/{dir}/{group}.fasta.pac',
+        'output/{dir}/{group}.2.bt2',
+        'output/{dir}/{group}.fasta.sa',
+        'output/{dir}/{group}.1.bt2',
+        'output/{dir}/{group}.fasta.ann',
+        'output/{dir}/{group}.4.bt2',
+        'output/{dir}/{group}.fasta.bwt'
+    run:
+        index_prefix = os.path.splitext(input.fasta)[0]
+        picard_dict = index_prefix + '.dict'
+        shell(' '.join(['bowtie2-build', input.fasta, index_prefix]))
+        shell(' '.join(['samtools', 'faidx', input.fasta]))
+        shell('picard CreateSequenceDictionary R=' + input.fasta +
+              ' O=' + picard_dict)
+        shell('bwa index {input}')
+
+
+rule align_to_assembly:
+    input:
+        unpack(match_reads),
+        unpack(match_assembly)
+    output:
+        bam = 'output/align_to_assembly{iter}/{sample}.bam'
+    threads: 12
+    resources:
+        mem_mb = 20000
+    params:
+        max_insert = 1000
+    log:
+        "output/align_to_assembly{iter}/log/{sample}.log"
+    run:
+        index_prefix = os.path.splitext(input.assembly)[0]
+        if wildcards.iter in ['_masked', '_unmasked']:
+            shell('bwa mem '
+                  '-t {threads} ' +
+                  '{input.assembly} '
+                  '-R "@RG\\tID:{wildcards.sample}\\tLIB:{wildcards.sample}\\t'
+                  'SM:{wildcards.sample}\\tPL:illumina" '
+                  '{input.fwd_reads} {input.rev_reads} | '
+                  'samtools view -bh - | '
+                  'samtools sort - > {output.bam} 2> {log}')
+        else:
+            shell('bowtie2 -1 {input.fwd_reads} -2 {input.rev_reads} '
+                  '-U {input.unpaired_reads} -X {params.max_insert} '
+                  '-x ' + index_prefix + ' --rg-id={wildcards.sample} '
+                  '--rg=LIB:{wildcards.sample} --rg=PL:illumina '
+                  '--rg=SM:{wildcards.sample} -p {threads} | '
+                  'samtools view -bh - | '
+                  'samtools sort - > {output.bam} 2> {log}')
+
+
+rule vcf_to_tab:
+    input:
+        unpack(match_assembly),
+        vcf = 'output/{dir}/{sample}.{vartype}.vcf'
+    output:
+        'output/{dir}/{sample}.{vartype}.vcf.tsv'
+    shell:
+        'gatk VariantsToTable '
+        '-R {input.ref} '
+        '-V {input.vcf} '
+        '-O {output} '
+        '-F CHROM -F POS -GF GT -F QUAL -F MQ -F DP -F TRANSTION -GF AD '
+        '-F "HOM-REF" -F "HOM-VAR" -F TYPE'
+# }}}
+
 
 # ==============================================================================
 # Build extra input files
@@ -319,56 +331,74 @@ rule trim_adapters:
         mink = '4',
         hdist = '1'
     shell:
-        "bbduk.sh in={input.fwd_reads} in2={input.rev_reads} threads=1 "
-        "out={output.fwd_reads} out2={output.rev_reads} ref={params.ref} "
-        "k={params.k} ktrim={params.ktrim} mink={params.mink} "
-        "hdist={params.hdist} threads={threads} tpe tbo 2> {log}"
+        'bbduk.sh '
+        'in={input.fwd_reads} in2={input.rev_reads} '
+        'threads={threads} '
+        'out={output.fwd_reads} out2={output.rev_reads} '
+        'ref={params.ref} '
+        'k={params.k} '
+        'ktrim={params.ktrim} '
+        'mink={params.mink} '
+        'hdist={params.hdist} '
+        'tpe tbo 2> {log}'
 
 
 rule merge_reads:
     input:
-        fwd_reads = rules.trim_adapters.output.fwd_reads,
-        rev_reads = rules.trim_adapters.output.rev_reads
+        fwd_reads = 'output/trim_adapters/{sample}.R1.fastq.gz',
+        rev_reads = 'output/trim_adapters/{sample}.R2.fastq.gz'
     output:
         fwd_reads = 'output/merge_reads/{sample}.R1.fastq.gz',
         rev_reads = 'output/merge_reads/{sample}.R2.fastq.gz',
-        merged_reads = 'output/merge_reads/{sample}.merged.fastq.gz',
+        merged_reads = 'output/merge_reads/{sample}.unpaired.fastq.gz',
         insert_hist = 'output/merge_reads/{sample}.hist'
-    log: "output/merge_reads/log/{sample}.log"
+    log:
+        'output/merge_reads/log/{sample}.log'
+    threads: 12
     params:
         vstrict = 't'
     shell:
-        "bbmerge.sh in1={input.fwd_reads} in2={input.rev_reads} threads=1 "
-        "out={output.merged_reads} outu={output.fwd_reads} "
-        "outu2={output.rev_reads} ihist={output.insert_hist} "
-        "vstrict={params.vstrict} 2> {log}"
+        'bbmerge.sh '
+        'in1={input.fwd_reads} in2={input.rev_reads} '
+        'threads={threads} '
+        'out={output.merged_reads} '
+        'outu={output.fwd_reads} outu2={output.rev_reads} '
+        'ihist={output.insert_hist} '
+        'vstrict={params.vstrict} 2> {log}'
 
 
 rule quality_trim:
     input:
-        fwd_reads = rules.merge_reads.output.fwd_reads,
-        rev_reads = rules.merge_reads.output.rev_reads,
-        merged_reads = rules.merge_reads.output.merged_reads
+        fwd_reads = 'output/merge_reads/{sample}.R1.fastq.gz',
+        rev_reads = 'output/merge_reads/{sample}.R2.fastq.gz',
+        merged_reads = 'output/merge_reads/{sample}.unpaired.fastq.gz',
     output:
         fwd_reads = 'output/quality_trim/{sample}.R1.fastq.gz',
         rev_reads = 'output/quality_trim/{sample}.R2.fastq.gz',
-        merged_reads = 'output/quality_trim/{sample}.merged.fastq.gz'
+        merged_reads = 'output/quality_trim/{sample}.unpaired.fastq.gz'
     log:
-        paired = "output/quality_trim/log/{sample}.paired.log",
-        unpaired = "output/quality_trim/log/{sample}.unpaired.log"
+        paired = 'output/quality_trim/log/{sample}.paired.log',
+        unpaired = 'output/quality_trim/log/{sample}.unpaired.log'
     threads: 10
     params:
         qtrim = 'rl',
         trimq = '20',
         minlen = '50'
-    shell:
-        "bbduk.sh in={input.fwd_reads} in2={input.rev_reads} "
-        "out={output.fwd_reads} out2={output.rev_reads} threads={threads} "
-        "qtrim={params.qtrim} trimq={params.trimq} minlen={params.minlen} "
-        "2> {log.paired} &&"
-        "bbduk.sh in={input.merged_reads} out={output.merged_reads} "
-        "qtrim={params.qtrim} trimq={params.trimq} minlen={params.minlen} "
-        "threads={threads} 2> {log.unpaired}"
+    run:
+        shell('bbduk.sh '
+              'in={input.fwd_reads} in2={input.rev_reads} '
+              'out={output.fwd_reads} out2={output.rev_reads} '
+              'threads={threads} '
+              'qtrim={params.qtrim} '
+              'trimq={params.trimq} '
+              'minlen={params.minlen} 2> {log.paired}')
+        shell('bbduk.sh '
+              'in={input.merged_reads} '
+              'out={output.merged_reads} '
+              'qtrim={params.qtrim} '
+              'trimq={params.trimq} '
+              'minlen={params.minlen} '
+              'threads={threads} 2> {log.unpaired}')
 # }}}
 
 # ==============================================================================
@@ -378,157 +408,150 @@ rule quality_trim:
 
 rule assembly:
     input:
-        unpack(get_iterations_reads)
+        unpack(match_reads)
     output:
-        assembly = 'output/assembly{iter}/{genotype}SC.fasta',
-        output_dir = 'output/assembly{iter}/{genotype}SC_spades'
+        assembly = 'output/assembly{iter}/{genotype}SC.fasta'
     threads: 8
     resources:
         mem_mb = 150000
-    shell:
-        "python2 util/spades/bin/spades.py -1 {input.fwd_reads} -2 "
-        "{input.rev_reads} -s {input.unpaired_reads} --threads {threads} "
-        "-o {output.output_dir} && "
-        "mv {output.output_dir}/scaffolds.fasta {output.assembly}"
+    run:
+        outdir = local.path('output') / ('assembly' + wildcards.iter)
+        clear_directory(outdir)
+        shell(
+            'python2 util/spades/bin/spades.py '
+            '-1 {input.fwd_reads} -2 {input.rev_reads} '
+            '-s {input.unpaired_reads} '
+            '--threads {threads} '
+            '-o ' + str(outdir))
+        (outdir / 'scaffolds.fasta').move(output.assembly)
 
 rule length_filter_assembly:
     input:
         lambda wildcards: (
-            ''.join(['output/repeatmasker/', wildcards.genotype, '.fasta'])
-            if wildcards.iter == '_reduced' else
+            ''.join(['output/filter_contamination_reduced/',
+                     wildcards.genotype, 'SC.fasta'])
+            if wildcards.iter in ['_reduced', '_unmasked', '_masked'] else
             ''.join(['output/assembly', wildcards.iter, '/', wildcards.genotype,
-                     'SC.fasta'])
-        )
+                     'SC.fasta']))
     output:
         'output/length_filter_assembly{iter}/{genotype}SC.fasta'
-    params:
-        minlen = lambda wildcards: (
-            "1000" if wildcards.iter == "_reduced" else "200")
-    shell: "length_filter_fasta.pl {params.minlen} {input} > {output}"
-
-rule index_length_filtered_assembly:
-    input:
-        'output/length_filter_assembly{iter}/{genotype}SC.fasta'
-    output:
-        ['output/length_filter_assembly{iter}/{genotype}SC' +
-         suffix for suffix in INDEX_SUFFIXES]
     run:
-        index_assembly(input[0])
+        if wildcards.iter == '_reduced':
+            minlen = '1000'
+        else:
+            minlen = '200'
+        shell('length_filter_fasta.pl ' + minlen + ' {input} > {output}')
 
 rule blast_assembly:
     input:
-        match_qc_assembly
+        unpack(match_assembly)
     output:
-        "output/blast_assembly{iter}/{genotype}SC.tsv"
+        'output/blast_assembly{iter}/{genotype}SC.tsv'
     threads: 10
     params:
-        max_target_seqs = "5",
-        evalue = "1e-25",
-        max_hsps = "1",
+        max_target_seqs = '5',
+        evalue = '1e-25',
+        max_hsps = '1',
     shell:
-        "blastn -db {config[blast_database]} -task megablast -max_target_seqs "
-        "{params.max_target_seqs} -max_hsps 1 -evalue {params.evalue} -query "
-        "{input} -out {output} -outfmt \"6 qseqid staxids bitscore std\" "
-        "-num_threads {threads}"
+        'blastn '
+        '-db {config[blast_database]} '
+        '-task megablast '
+        '-max_target_seqs {params.max_target_seqs} '
+        '-max_hsps {params.max_hsps} '
+        '-evalue {params.evalue} '
+        '-query {input} '
+        '-out {output} '
+        '-outfmt \'6 qseqid staxids bitscore std\' '
+        '-num_threads {threads}'
+
 
 rule diamond_blast_assembly:
     input:
-        assembly = match_qc_assembly,
-        db = "output/build_diamond_database/uniprot_ref_proteomes.dmnd"
+        unpack(match_assembly),
+        db = 'output/build_diamond_database/uniprot_ref_proteomes.dmnd'
     output:
-        "output/diamond_blast_assembly{iter}/{genotype}SC.out"
+        'output/diamond_blast_assembly{iter}/{genotype}SC.out'
     params:
-        max_target_seqs = "1",
-        evalue = "1e-25"
+        max_target_seqs = '1',
+        evalue = '1e-25'
     threads: 16
     resources:
         mem_mb = 50000
     shell:
-        "diamond blastx --query {input.assembly} --max-target-seqs "
-        "{params.max_target_seqs} --threads {threads} --sensitive "
-        "--db {input.db} --evalue {params.evalue} --outfmt 6 --out {output}"
+        'diamond blastx '
+        '--query {input.assembly} '
+        '--max-target-seqs {params.max_target_seqs} '
+        '--threads {threads} '
+        '--sensitive '
+        '--db {input.db} '
+        '--evalue {params.evalue} '
+        '--outfmt 6 '
+        '--out {output}'
 
 rule taxify_diamond_blasts:
     input:
-        diamond_hits = "output/diamond_blast_assembly{iter}/{genotype}SC.out",
-        taxids = "output/build_diamond_database/uniprot_ref_proteomes.taxids"
+        diamond_hits = 'output/diamond_blast_assembly{iter}/{genotype}SC.out',
+        taxids = 'output/build_diamond_database/uniprot_ref_proteomes.taxids'
     output:
-        "output/diamond_blast_assembly{iter}/{genotype}SC.taxified.out",
+        'output/diamond_blast_assembly{iter}/{genotype}SC.taxified.out',
     params:
-        output_prefix = "output/diamond_blast_assembly{iter}/"
+        output_prefix = 'output/diamond_blast_assembly{iter}/'
     shell:
-        "blobtools taxify -f {input.diamond_hits} -m {input.taxids} -s 0 -t 2 "
-        "-o {params.output_prefix}"
+        'blobtools taxify -f {input.diamond_hits} -m {input.taxids} -s 0 -t 2 '
+        '-o {params.output_prefix}'
 
-rule align_to_assembly:
-    input:
-        unpack(get_iterations_reads),
-        assembly = match_assembly,
-        index = match_assembly_index
-    output:
-        bam = 'output/align_to_assembly{iter}/{sample}.bam',
-        bai = 'output/align_to_assembly{iter}/{sample}.bam.bai'
-    threads: 12
-    resources:
-        mem_mb = 20000
-    params:
-        max_insert = 1000
-    log:
-        "output/align_to_assembly{iter}/log/{sample}.log"
-    run:
-        index_prefix = get_bowtie2_idx_root(input.index[0])
-        shell('bowtie2 -1 {input.fwd_reads} -2 {input.rev_reads} '
-              '-U {input.unpaired_reads} -X {params.max_insert} '
-              '-x ' + index_prefix + ' --rg-id={wildcards.sample} '
-              '--rg=LIB:{wildcards.sample} --rg=PL:illumina '
-              '--rg=SM:{wildcards.sample} -p {threads} | samtools view -bh - | '
-              'samtools sort - > {output.bam} 2> {log}')
-        shell('samtools index {output.bam}')
 
 rule convert_alignment_to_cov:
     input:
-        bam = "output/align_to_assembly{iter}/{sample}.bam",
-        assembly = lambda wildcards: ''.join([
-            "output/length_filter_assembly", wildcards.iter, '/',
-            get_genotype_for_sample(wildcards), 'SC.fasta'])
+        unpack(match_assembly),
+        bam = 'output/align_to_assembly{iter}/{sample}.bam',
+        bai = 'output/align_to_assembly{iter}/{sample}.bam.bai',
     output:
-        "output/convert_alignment_to_cov{iter}/{sample}.bam.cov"
+        'output/convert_alignment_to_cov{iter}/{sample}.bam.cov'
     resources:
         mem_mb = 20000
     params:
-        output_prefix = "output/convert_alignment_to_cov{iter}/"
+        output_prefix = 'output/convert_alignment_to_cov{iter}/'
     log:
-        "output/convert_alignment_to_cov{iter}/logs/{sample}.log"
+        'output/convert_alignment_to_cov{iter}/logs/{sample}.log'
     shell:
-        "blobtools map2cov -i {input.assembly} -b {input.bam} "
-        "-o {params.output_prefix} 2> {log}"
+        'blobtools map2cov '
+        '-i {input.assembly} '
+        '-b {input.bam} '
+        '-o {params.output_prefix} 2> {log}'
 
 rule init_blobtools_database:
     input:
-        assembly = match_qc_assembly,
-        blast_hits = "output/blast_assembly{iter}/{genotype}SC.tsv",
-        diamond_hits = ('output/diamond_blast_assembly{iter}/{genotype}SC.'
-                        'taxified.out'),
-        covs = get_assembly_covfiles_from_genotype
+        unpack(match_assembly),
+        blast_hits = 'output/blast_assembly{iter}/{genotype}SC.tsv',
+        covs = lambda wildcards: [
+            '/'.join([
+                'output/convert_alignment_to_cov' + wildcards.iter,
+                smp + '.bam.cov'])
+            for smp in GENOTYPE_TO_SAMPLE[wildcards.genotype]],
+        diamond_hits = (
+            'output/diamond_blast_assembly{iter}/{genotype}SC.taxified.out')
     output:
-        "output/init_blobtools_database{iter}/{genotype}.blobDB.json"
+        'output/init_blobtools_database{iter}/{genotype}.blobDB.json'
     resources:
         mem_mb = 20000
     params:
-        output_prefix = "output/init_blobtools_database{iter}/{genotype}"
+        output_prefix = 'output/init_blobtools_database{iter}/{genotype}'
     log:
-        "output/init_blobtools_database{iter}/log/{genotype}.log"
+        'output/init_blobtools_database{iter}/log/{genotype}.log'
     run:
-        cov_args = ' -c '.join(input.covs)
-        shell("blobtools create -i {input.assembly} "
-              "--title {wildcards.genotype} --out {params.output_prefix} "
-              "--hitsfile {input.blast_hits} --hitsfile {input.diamond_hits} "
-              "--nodes {config[nodes_dmp]} --names {config[names_dmp]} "
-              "-c " + cov_args + " > {log} 2>&1")
+        cov_args = '-c ' + ' -c '.join(input.covs)
+        shell('blobtools create '
+              '-i {input.assembly} '
+              '--title {wildcards.genotype} '
+              '--out {params.output_prefix} '
+              '--hitsfile {input.blast_hits} --hitsfile {input.diamond_hits} '
+              '--nodes {config[nodes_dmp]} --names {config[names_dmp]} ' +
+              cov_args + ' > {log} 2>&1')
 
 rule produce_blobplots:
     input:
-        "output/init_blobtools_database{iter}/{genotype}.blobDB.json"
+        db = 'output/init_blobtools_database{iter}/{genotype}.blobDB.json'
     output:
         ('output/produce_blobplots{iter}/{genotype}/family/{genotype}.bestsum.'
          'family.p20.span.100.blobplot.cov0.png'),
@@ -544,97 +567,113 @@ rule produce_blobplots:
     resources:
         mem_mb = 40000
     params:
-        output_prefix = "output/produce_blobplots{iter}/{genotype}"
-    shell:
-        "scripts/produce_blobplots.py -o {params.output_prefix} -d {input}"
+        outdir = 'output/produce_blobplots{iter}/{genotype}'
+    run:
+        processes = []
+        for rank in ['family', 'genus', 'order', 'phylum', 'species']:
+            outdir = params.outdir + '/' + rank + '/'
+            processes.append(
+                blobtools.popen([
+                    'blobplot', '-p', '20', '-r', rank, '-i', input.db, '-o',
+                    outdir]))
+        for process in processes:
+            process.join()
 
 rule produce_covplots:
     input:
-        cov = "output/convert_alignment_to_cov{iter}/{sample}.bam.cov",
-        db = lambda wildcards: ''.join(["output/init_blobtools_database",
-                                        wildcards.iter, "/",
-                                        get_genotype_for_sample(wildcards),
-                                        ".blobDB.json"])
+        cov = 'output/convert_alignment_to_cov{iter}/{sample}.bam.cov',
+        db = lambda wildcards: '/'.join([
+            'output/init_blobtools_database' + wildcards.iter,
+            get_genotype(wildcards) + '.blobDB.json'])
     output:
-        "output/produce_covplots{iter}/{sample}.covsum.png"
+        'output/produce_covplots{iter}/{sample}.covsum.png'
     params:
-        output_prefix = "output/produce_covplots{iter}/{sample}",
-        rank = "superkingdom"
+        output_prefix = 'output/produce_covplots{iter}/{sample}',
+        rank = 'superkingdom'
     run:
-        shell("blobtools covplot -p 20 -c {input.cov} "
-              "-i {input.db} -r {params.rank} "
-              "-o {params.output_prefix}")
+        shell('blobtools covplot -p 20 -c {input.cov} '
+              '-i {input.db} -r {params.rank} '
+              '-o {params.output_prefix}')
 
         outdir = local.path(params.output_prefix).dirname
-        output_files = outdir.glob(wildcards.sample + "*")
+        output_files = outdir.glob(wildcards.sample + '*')
         for f in output_files:
-            extensions = '.'.join(f.name.split(".")[-2:])
-            newname = outdir / (wildcards.sample + "." + extensions)
+            extensions = '.'.join(f.name.split('.')[-2:])
+            newname = outdir / (wildcards.sample + '.' + extensions)
             f.move(newname)
 
 rule produce_blobtable:
     input:
-        db = "output/init_blobtools_database{iter}/{genotype}.blobDB.json"
+        db = 'output/init_blobtools_database{iter}/{genotype}.blobDB.json'
     output:
-        "output/produce_blobtable{iter}/{genotype}.blobDB.bestsum.table.txt"
+        'output/produce_blobtable{iter}/{genotype}.blobDB.bestsum.table.txt'
+    params:
+        outdir = 'output/produce_blobtable{iter}/'
     shell:
-        "blobtools view -r all -b -i {input.db} "
-        "-o output/produce_blobtable{wildcards.iter}/"
+        'blobtools view -r all -b -i {input.db} -o {params.outdir}'
 
 
-# List the contigs which failed the filtering step
 rule find_contam_contigs:
     input:
-        "output/produce_blobtable{iter}/{genotype}.blobDB.bestsum.table.txt"
+        'output/produce_blobtable{iter}/{genotype}.blobDB.bestsum.table.txt'
     output:
-        "output/find_contam_contigs{iter}/{genotype}.txt"
-    params:
-        find_contam_contigs = 'scripts/find_contam_contigs{iter}.R'
+        'output/find_contam_contigs{iter}/{genotype}.txt'
     shell:
-        '{params.find_contam_contigs} {input} > {output}'
+        'scripts/find_contam_contigs{wildcards.iter}.R {input} > {output}'
 
 
 # List the contigs which passed the filtering step
 rule generate_inclusion_list:
     input:
-        exclusions = get_exclusions,
-        assembly = get_filter_alignment
+        unpack(match_filter_alignment),
+        exclusions = lambda wildcards: (
+            'output/find_mitochondrial_scaffolds/{genotype}.txt'
+            if wildcards.iter == '_reduced'
+            else ''.join(['output/find_contam_contigs', wildcards.iter,
+                          '/{genotype}.txt']))
     output:
-        "output/generate_inclusion_list{iter}/{genotype}.txt"
+        'output/generate_inclusion_list{iter}/{genotype}.txt'
     shell:
-        "list_csomes {input.assembly} | complement.sh /dev/stdin "
-        "{input.exclusions} > {output}"
+        'list_csomes {input.assembly} | '
+        'complement.sh /dev/stdin {input.exclusions} > {output}'
 
 
 rule filter_contamination:
     input:
-        passing_contigs = lambda wildcards: ''.join([
-            "output/generate_inclusion_list", wildcards.iter, "/",
-            get_genotype_for_sample(wildcards), ".txt"]),
-        bam = get_filter_alignment
+        unpack(match_filter_alignment),
+        passing_contigs = lambda wildcards: '/'.join([
+            'output/generate_inclusion_list' + wildcards.iter,
+            get_genotype(wildcards) + '.txt']),
     output:
-        fwd = "output/filter_contamination{iter}/{sample}.R1.fastq.gz",
-        rev = "output/filter_contamination{iter}/{sample}.R2.fastq.gz",
-        unpaired = "output/filter_contamination{iter}/{sample}.unpaired.fastq.gz"
+        fwd = 'output/filter_contamination{iter}/{sample}.R1.fastq.gz',
+        rev = 'output/filter_contamination{iter}/{sample}.R2.fastq.gz',
+        unpaired = (
+            'output/filter_contamination{iter}/{sample}.unpaired.fastq.gz')
     threads: 16
     resources:
         mem_mb = 60000
     params:
-        output_prefix = "output/filter_contamination{iter}/{sample}"
+        output_prefix = 'output/filter_contamination{iter}/{sample}'
     log:
-        "output/filter_contamination{iter}/logs/{sample}.log"
+        'output/filter_contamination{iter}/logs/{sample}.log'
     run:
         # This step removes all reads which are not mapped to a contig in the
         # inclusion list (this includes unmapped reads).
-        shell("extract_csomes.py -n 200 -p {threads} -o {params.output_prefix} "
-              "-i {input.passing_contigs} -f fastq {input.bam} 2> {log}")
+        shell('extract_csomes.py '
+              '-n 200 '
+              '-p {threads} '
+              '-o {params.output_prefix} '
+              '-i {input.passing_contigs} '
+              '-f fastq {input.bam} 2> {log}')
 
         outdir = local.path(output.unpaired).dirname
         tmp = outdir / (uuid4().hex + '.fastq.gz')
         # Remove all unpaired reads which are not merged
-        shell("zcat {output.unpaired} | paste - - - - | awk "
-              "'length($2) >= 151' | sed 's/\\t/\\n/g' | gzip - > " + str(tmp))
-        move(str(tmp), output.unpaired)
+        shell("zcat {output.unpaired} | "
+              "paste - - - - | "
+              "awk 'length($2) >= 151' | sed 's/\\t/\\n/g' | "
+              "gzip - > " + str(tmp))
+        tmp.move(output.unpaired)
 
 # }}}
 
@@ -651,9 +690,7 @@ rule redundans:
             'output/filter_contamination2/{genotype}SC.unpaired.fastq.gz'),
         assembly = 'output/assembly3/{genotype}SC.fasta'
     output:
-        fasta = 'output/redundans/{genotype}SC.fasta',
-        index = ['output/redundans/{genotype}SC' + suffix
-                 for suffix in INDEX_SUFFIXES]
+        fasta = 'output/redundans/{genotype}SC.fasta'
     params:
         outdir = 'output/redundans/{genotype}'
     threads: 16
@@ -662,6 +699,7 @@ rule redundans:
     log:
         'output/redundans/log/{genotype}.log'
     run:
+        clear_directory(params.outdir)
         shell('rm -rf {params.outdir}')
         shell('python2 {config[redundans_bin]} -v -f {input.assembly} '
               '-i {input.fwd_reads} {input.rev_reads} {input.unpaired_reads} '
@@ -669,8 +707,7 @@ rule redundans:
               '-r {config[nuclear_reference]} '
               '-t {threads} '
               '--usebwa 2> {log}')
-        shell('mv {params.outdir}/scaffolds.reduced.fa {output.fasta}')
-        index_assembly(output.fasta)
+        (local.path(params.outdir) / 'scaffolds.reduced.fa').move(output.fasta)
 
 rule blast_against_mitochondria:
     input:
@@ -691,121 +728,34 @@ rule filter_mitochondrial_scaffolds:
         blast = 'output/blast_against_mitochondria/{genotype}.tsv',
         assembly = 'output/redundans/{genotype}SC.fasta'
     output:
-        fasta = 'output/filter_mitochondrial_scaffolds/{genotype}SC.fasta',
-        txt = 'output/filter_mitochondrial_scaffolds/{genotype}SC.txt'
+        fasta = 'output/find_mitochondrial_scaffolds/{genotype}.fasta',
+        txt = 'output/find_mitochondrial_scaffolds/{genotype}.txt'
     shell:
-        'scripts/filter_mitochondrial_scaffolds.py --blast {input.blast} '
-        '--assembly {input.assembly} --outfasta {output.fasta} '
+        'scripts/filter_mitochondrial_scaffolds.py '
+        '--blast {input.blast} '
+        '--assembly {input.assembly} '
+        '--outfasta {output.fasta} '
         '--outtxt {output.txt}'
-
-rule preliminary_alignment_to_reduced:
-    input:
-        fwd_reads = 'output/filter_contamination2/{sample}.R1.fastq.gz',
-        rev_reads = 'output/filter_contamination2/{sample}.R2.fastq.gz',
-        unpaired_reads = (
-            'output/filter_contamination2/{sample}.unpaired.fastq.gz'),
-        assembly = lambda wildcards: (
-            'output/redundans/' + wildcards.sample[0:2] + 'SC.fasta'),
-        index = lambda wildcards: (
-            ['output/redundans/' + wildcards.sample[0:2] + 'SC' + suffix
-             for suffix in INDEX_SUFFIXES])
-    output:
-        bam = 'output/preliminary_alignment_to_reduced/{sample}.bam',
-        bai = 'output/preliminary_alignment_to_reduced/{sample}.bam.bai'
-    threads: 12
-    resources:
-        mem_mb = 20000
-    params:
-        max_insert = 1000
-    log:
-        "output/preliminary_alignment_to_reduced/log/{sample}.log"
-    run:
-        index_prefix = get_bowtie2_idx_root(input.index[0])
-        shell('bowtie2 -1 {input.fwd_reads} -2 {input.rev_reads} '
-              '-U {input.unpaired_reads} -X {params.max_insert} '
-              '-x ' + index_prefix + ' --rg-id={wildcards.sample} '
-              '--rg=LIB:{wildcards.sample} --rg=PL:illumina '
-              '--rg=SM:{wildcards.sample} -p {threads} | samtools view -bh - | '
-              'samtools sort - > {output.bam} 2> {log}')
-        shell('samtools index {output.bam}')
-
-
-# This copy of assembly is just used for quality metrics since we don't want
-# to do QC summaries on the masked copies.
-rule qc_length_filter:
-    input:
-        'output/filter_mitochondrial_scaffolds/{genotype}SC.fasta'
-    output:
-        fasta = 'output/qc_length_filter/{genotype}SC.fasta',
-        index = ['output/qc_length_filter/{genotype}SC' + suffix
-                 for suffix in INDEX_SUFFIXES]
-    params:
-        minlen = 1000
-    run:
-        shell("length_filter_fasta.pl {params.minlen} {input} > {output.fasta}")
-        index_assembly(output.fasta)
 
 rule repeatmasker:
     input:
-        'output/filter_mitochondrial_scaffolds/{genotype}SC.fasta'
+        'output/length_filter_assembly_reduced/{genotype}SC.fasta'
     output:
-        masked = 'output/repeatmasker/{genotype}.fasta',
-        out = 'output/repeatmasker/{genotype}.out'
+        masked = 'output/repeatmasker/{genotype}SC.fasta',
+        out = 'output/repeatmasker/{genotype}SC.out'
     threads: 8
     run:
         shell('RepeatMasker '
-        '-lib {config[repeat_library]} '
-        '-s -par {threads} {input}')
+              '-lib {config[repeat_library]} '
+              '-s '
+              '-par {threads} '
+              '{input}')
         input_dir = local.path(input).dirname
         output_dir = local.path(output.masked).dirname
         tmp_outputs = [input_dir / (wildcards.genotype + 'SC' + suffix)
                        for suffix in ['.fasta.masked', '.fasta.out']]
         for tmp, final in zip(tmp_outputs, output):
             tmp.move(final)
-
-rule index_reduced_assembly:
-    input:
-        'output/repeatmasker/{genotype}SC.fasta'
-    output:
-        indices = (['output/repeatmasker/{genotype}SC' + suffix
-                    for suffix in INDEX_SUFFIXES])
-    run:
-        index_assembly(input[0])
-
-# }}}
-
-# ==============================================================================
-# Final alignment
-# ==============================================================================
-# {{{
-rule novoalign_index_assembly:
-    input:
-        'output/length_filter_assembly_reduced/{genotype}SC.fasta'
-    output:
-        'output/length_filter_assembly_reduced/{genotype}SC.nix'
-    shell:
-        'novoindex {output} {input}'
-
-rule align_to_reduced_assembly:
-    input:
-        assembly = match_reduced_assembly,
-        index = match_reduced_assembly_index,
-        fwd_reads = 'output/filter_contamination_reduced/{sample}.R1.fastq.gz',
-        rev_reads = 'output/filter_contamination_reduced/{sample}.R2.fastq.gz',
-        unpaired_reads = ('output/filter_contamination_reduced/{sample}.unpaired.fastq.gz')
-    output:
-        bam = 'output/align_to_reduced_assembly/{sample}.bam',
-        bai = 'output/align_to_reduced_assembly/{sample}.bam.bai'
-    log:
-        'output/align_to_reduced_assembly/log/{sample}.log'
-    run:
-        shell('novoalign '
-              '-f {input.fwd_reads} {input.rev_reads} '
-              '-d {input.assembly} '
-              '-o SAM | '
-              'samtools view -bh - | '
-              'samtools sort - > {output.bam} 2> {log}')
-        shell('samtools index {output.bam}')
 
 # }}}
 
@@ -816,21 +766,21 @@ rule align_to_reduced_assembly:
 
 rule mark_duplicates:
     input:
-        bam = 'output/align_to_reduced_assembly/{sample}.bam',
-        bai = 'output/align_to_reduced_assembly/{sample}.bam.bai'
+        bam = 'output/align_to_assembly{iter}/{sample}.bam',
+        bai = 'output/align_to_assembly{iter}/{sample}.bam.bai'
     output:
-        bam = 'output/mark_duplicates/{sample}.bam',
-        bai = 'output/mark_duplicates/{sample}.bam.bai'
+        bam = 'output/mark_duplicates{iter}/{sample}.bam',
+        logfile = 'output/mark_duplicates{iter}/log/{sample}.log'
     resources:
         mem_mb = 30000
     log:
         'output/mark_duplicates/log/{sample}.log'
     shell:
-        'picard MarkDuplicates I={input.bam} O={output.bam} '
-        'REMOVE_DUPLICATES=True M={log} && '
-        'samtools index {output.bam}'
-
-
+        'picard MarkDuplicates '
+        'I={input.bam} '
+        'O={output.bam} '
+        'REMOVE_DUPLICATES=True '
+        'M={log}'
 
 # }}}
 
@@ -840,12 +790,11 @@ rule mark_duplicates:
 # {{{
 rule call_variants:
     input:
-        bam = 'output/mark_duplicates/{sample}.bam',
-        bai = 'output/mark_duplicates/{sample}.bam.bai',
-        assembly = match_reduced_assembly,
-        index = match_reduced_assembly_index
+        unpack(match_assembly),
+        bam = 'output/mark_duplicates_masked/{sample}.bam',
+        bai = 'output/mark_duplicates_masked/{sample}.bam.bai',
     output:
-        gvcf = 'output/call_variants{iter}/{sample}.g.vcf'
+        gvcf = 'output/call_variants{call}/{sample}.g.vcf'
     resources:
         mem_mb = 20000
     params:
@@ -865,11 +814,10 @@ rule call_variants:
 
 rule genotype_gvcfs:
     input:
-        gvcf = 'output/call_variants{iter}/{sample}.g.vcf',
-        ref = match_reduced_assembly,
-        index = match_reduced_assembly_index
+        unpack(match_assembly),
+        gvcf = 'output/call_variants{call}/{sample}.g.vcf',
     output:
-        'output/genotype_gvcfs{iter}/{sample}.vcf'
+        'output/genotype_gvcfs{call}/{sample}.vcf'
     params:
         snp_heterozygosity = 0.015,
         indel_heterozygosity = 0.01
@@ -883,85 +831,55 @@ rule genotype_gvcfs:
 
 rule extract_variant_coverage:
     input:
-        'output/genotype_gvcfs{iter}/{sample}.vcf'
+        'output/genotype_gvcfs{call}/{sample}.vcf'
     output:
         'output/extract_variant_coverage{iter}/{sample}.txt',
     shell:
         'extract_variant_coverage.py -o {output} {input}'
 
-rule select_snps:
+rule select_variants:
     input:
-        vcf = 'output/genotype_gvcfs{iter}/{sample}.vcf',
-        ref = match_reduced_assembly,
-        index = match_reduced_assembly_index
+        unpack(match_assembly),
+        vcf = 'output/genotype_gvcfs{call}/{sample}.vcf',
     output:
-        'output/select_variants{iter}/{sample}.snps.vcf'
-    shell:
-        'gatk SelectVariants '
-        '-R {input.ref} '
-        '-V {input.vcf} '
-        '--select-type-to-include SNP '
-        '-O {output}'
-
-rule select_other:
-    input:
-        vcf = 'output/genotype_gvcfs{iter}/{sample}.vcf',
-        ref = match_reduced_assembly,
-        index = match_reduced_assembly_index
-    output:
-        'output/select_variants{iter}/{sample}.other.vcf'
-    shell:
-        'gatk SelectVariants '
-        '-R {input.ref} '
-        '-V {input.vcf} '
-        '--select-type-to-exclude SNP --select-type-to-exclude INDEL '
-        '-O {output}'
-
-rule select_indels:
-    input:
-        vcf = 'output/genotype_gvcfs{iter}/{sample}.vcf',
-        ref = match_reduced_assembly,
-        index = match_reduced_assembly_index
-    output:
-        'output/select_variants{iter}/{sample}.indels.vcf'
-    shell:
-        'gatk SelectVariants '
-        '-R {input.ref} '
-        '-V {input.vcf} '
-        '--select-type-to-include INDEL '
-        '-O {output}'
+        'output/select_variants{call}/{sample}.{vartype}.vcf'
+    run:
+        if wildcards.vartype == 'snps':
+            criteria = '--select-vartype-to-include SNP'
+        elif wildcards.vartype == 'indels':
+            criteria = '--select-vartype-to-include INDEL'
+        elif wildcards.vartype == 'other':
+            criteria = (
+                '--select-vartype-to-exclude SNP --select-vartype-to-exclude INDEL')
+        shell('gatk SelectVariants '
+              '-R {input.assembly} '
+              '-V {input.vcf} '
+              '-O {output} ' +
+              criteria)
 
 rule exclude_nonvariants:
     input:
-        vcf = 'output/select_variants{iter}/{sample}.{type}.vcf',
-        ref = match_reduced_assembly,
-        index = match_reduced_assembly_index
+        unpack(match_assembly),
+        vcf = 'output/select_variants{call}/{sample}.{vartype}.vcf',
     output:
-        vcf = 'output/exclude_nonvariants{iter}/{sample}.{type}.vcf',
-        table = 'output/exclude_nonvariants{iter}/{sample}.{type}.table'
+        vcf = 'output/exclude_nonvariants{call}/{sample}.{vartype}.vcf',
+        table = 'output/exclude_nonvariants{call}/{sample}.{vartype}.vcf.tsv'
     shell:
         'gatk SelectVariants '
-        '-R {input.ref} '
+        '-R {input.assembly} '
         '-V {input.vcf} '
         '--exclude-non-variants '
-        '-O {output.vcf} && '
-        'gatk VariantsToTable '
-        '-R {input.ref} '
-        '-V {output.vcf} '
-        '-O {output.table} '
-        '-F CHROM -F POS -GF GT -F QUAL -F MQ -F DP -F TRANSTION -GF AD '
-        '-F "HOM-REF" -F "HOM-VAR" -F TYPE'
+        '-O {output.vcf}'
 
 rule extract_variant_quality_scores:
     input:
-        vcf = 'output/select_variants{iter}/{sample}.{type}.vcf',
-        ref = match_reduced_assembly,
-        index = match_reduced_assembly_index
+        unpack(match_assembly),
+        vcf = 'output/select_variants{call}/{sample}.{vartype}.vcf'
     output:
-        'output/extract_variant_quality_scores{iter}/{sample}.{type}.table'
+        'output/extract_variant_quality_scores{call}/{sample}.{vartype}.q.tsv'
     shell:
         'gatk VariantsToTable '
-        '-R {input.ref} '
+        '-R {input.assembly} '
         '-V {input.vcf} '
         '-F CHROM -F QUAL -F QD -F DP -F MQ -F MQRankSum -F FS '
         '-F ReadPosRankSum -F SOR '
@@ -969,103 +887,70 @@ rule extract_variant_quality_scores:
 
 rule plot_variant_quality_scores:
     input:
-        snps = 'output/extract_variant_quality_scores{iter}/{sample}.snps.table',
+        snps = (
+            'output/extract_variant_quality_scores{call}/{sample}.snps.q.tsv'),
         indels = (
-            'output/extract_variant_quality_scores{iter}/{sample}.indels.table')
+            'output/extract_variant_quality_scores{call}/{sample}.indels.q.tsv')
     output:
-        'output/plot_variant_quality_scores{iter}/{sample}.svg'
+        'output/plot_variant_quality_scores{call}/{sample}.svg'
     script:
         'scripts/plot_variant_quality_scores.R'
 
-rule filter_snps:
-    input:
-        vcf = 'output/select_variants{iter}/{sample}.snps.vcf',
-        ref = match_reduced_assembly,
-        index = match_reduced_assembly_index
-    output:
-        'output/filter_variants{iter}/{sample}.snps.vcf'
-    params:
-        QD = '< 2.0',
-        FS = '> 60.0',
-        MQ = '< 35.0',
-        QUAL = '< 100',
-        SOR = '> 4.000',
-        MQRankSum = '< -12.5',
-        ReadPosRankSum = ['< -10.0', '> 10.0']
-    run:
-        filter_expression = build_filter_expression(params)
-        shell('gatk VariantFiltration '
-        '-R {input.ref} '
-        '-V {input.vcf} '
-        '-O {output} '
-        '--filter-name snp_filter '
-        '--filter-expression ' + filter_expression)
 
-rule filter_indels:
+rule filter_variants:
     input:
-        vcf = 'output/select_variants{iter}/{sample}.indels.vcf',
-        ref = match_reduced_assembly,
-        index = match_reduced_assembly_index
+        unpack(match_assembly),
+        vcf = 'output/select_variants{call}/{sample}.{vartype}.vcf',
     output:
-        'output/filter_variants{iter}/{sample}.indels.vcf'
+        'output/filter_variants{call}/{sample}.{vartype}.vcf'
     params:
-        QD = '< 5.0',
-        FS = '> 200.0',
-        QUAL = '< 100.0',
-        SOR = '> 10.000',
-        ReadPosRankSum = ['< -10.0', '> 10.0']
     run:
-        filter_expression = build_filter_expression(params)
+        if wildcards.vartype == 'snps':
+            filters = {
+                'QD': '< 2.0',
+                'FS': '> 60.0',
+                'MQ': '< 35.0',
+                'SOR': '> 4.0',
+                'MQRankSum': '< -12.5',
+                'ReadPosRankSum': ['< -10.0', '> 10.0']
+            }
+        elif wildcards.vartype in ['indels', 'other']:
+            filters = {
+                'QD': '< 5.0',
+                'FS': '> 200.0',
+                'QUAL': '< 100.0',
+                'SOR': '> 10.0',
+                'ReadPosRankSum': ['< -10.0', '> 10.0']
+            }
+        filter_expression = build_filter_expression(filters)
         shell('gatk VariantFiltration '
-        '-R {input.ref} '
-        '-V {input.vcf} '
-        '-O {output} '
-        '--filter-name indel_filter '
-        '--filter-expression ' + filter_expression)
-
-rule filter_other_variants:
-    input:
-        vcf = 'output/select_variants{iter}/{sample}.other.vcf',
-        ref = match_reduced_assembly,
-        index = match_reduced_assembly_index
-    output:
-        'output/filter_variants{iter}/{sample}.other.vcf'
-    params:
-        QD = '< 5.0',
-        FS = '> 200.0',
-        ReadPosRankSum = ['< -10.0', '> 10.0']
-    run:
-        filter_expression = build_filter_expression(params)
-        shell('gatk VariantFiltration '
-        '-R {input.ref} '
-        '-V {input.vcf} '
-        '-O {output} '
-        '--filter-name indel_filter '
-        '--filter-expression ' + filter_expression)
+              '-R {input.assembly} '
+              '-V {input.vcf} '
+              '-O {output} '
+              '--filter-name snp_filter '
+              '--filter-expression ' + filter_expression)
 
 rule calc_number_filtered_sites:
     input:
-        pre = 'output/select_variants{iter}/{sample}.{type}.vcf',
-        post = 'output/filter_variants{iter}/{sample}.{type}.vcf'
+        pre = 'output/select_variants{call}/{sample}.{vartype}.vcf',
+        post = 'output/filter_variants{call}/{sample}.{vartype}.vcf'
     output:
-        'output/calc_number_filtered_sites{iter}/{sample}.{type}.txt'
+        'output/calc_number_filtered_sites{call}/{sample}.{vartype}.txt'
     shell:
         'echo "Sites prefilter: " >> {output}; '
         'grep -vc "^#" {input.pre} >>  {output}; '
         'echo "\nSites postfilter: " >> {output}; '
         'grep -vc "^#" {input.post} >> {output}'
 
-
 rule depth_filter_variants:
     input:
-        vcf = 'output/filter_variants{iter}/{sample}.{type}.vcf',
-        ref = match_reduced_assembly,
-        index = match_reduced_assembly_index
+        unpack(match_assembly),
+        vcf = 'output/filter_variants{call}/{sample}.{vartype}.vcf',
     output:
-        vcf = 'output/depth_filter_variants{iter}/{sample}.{type}.vcf'
+        vcf = 'output/depth_filter_variants{call}/{sample}.{vartype}.vcf'
     shell:
         'gatk VariantFiltration '
-            '-R {input.ref} '
+            '-R {input.assembly} '
             '-V {input.vcf} '
             '-O {output.vcf} '
             '--filter-name depth_filter '
@@ -1073,52 +958,35 @@ rule depth_filter_variants:
 
 rule remove_filtered_variants:
     input:
-        vcf = 'output/depth_filter_variants{iter}/{sample}.{type}.vcf',
-        ref = match_reduced_assembly,
-        index = match_reduced_assembly_index
+        unpack(match_assembly),
+        vcf = 'output/depth_filter_variants{call}/{sample}.{vartype}.vcf',
     output:
-        'output/remove_filtered_variants{iter}/{sample}.{type}.vcf'
+        'output/remove_filtered_variants{call}/{sample}.{vartype}.vcf'
     shell:
         'gatk SelectVariants '
-        '-R {input.ref} '
+        '-R {input.assembly} '
         '-V {input.vcf} '
         '-O {output} '
         '--exclude-filtered '
         '--exclude-non-variants'
 
-rule vcf_to_tab:
-    input:
-        vcf = 'output/remove_filtered_variants{iter}/{sample}.{type}.vcf',
-        ref = match_reduced_assembly,
-        index = match_reduced_assembly_index
-    output:
-        'output/vcf_to_tab{iter}/{sample}.{type}.table'
-    shell:
-        'gatk VariantsToTable '
-        '-R {input.ref} '
-        '-V {input.vcf} '
-        '-O {output} '
-        '-F CHROM -F POS -GF GT -F QUAL -F MQ -F DP -F TRANSTION -GF AD '
-        '-F "HOM-REF" -F "HOM-VAR" -F TYPE'
-
 rule select_unique_variants:
     input:
-        filtered = expand('output/vcf_to_tab{{iter}}/{sample}.{{type}}.table',
-                sample=SAMPLE),
+        filtered = expand(
+            'output/remove_filtered_variants{{call}}/{sample}.{{vartype}}.vcf.tsv',
+            sample=SAMPLE),
         unfiltered = expand(
-                'output/exclude_nonvariants{{iter}}/{sample}.{{type}}.table',
-                sample=SAMPLE)
+            'output/exclude_nonvariants{{call}}/{sample}.{{vartype}}.vcf.tsv',
+            sample=SAMPLE)
     output:
-        expand('output/select_unique_variants{{iter}}/{sample}.{{type}}.table',
+        expand('output/select_unique_variants{{call}}/{sample}.{{vartype}}.vcf.tsv',
                 sample=SAMPLE)
-    resources:
-        mem_mb = 10000
     run:
         # Remove all sites in each filtered sample which are also present in any
         # unfiltered sample of the same genotype.
         output_prefix = os.path.dirname(output[0]) + '/'
         for genotype in GENOTYPE:
-            genotype_samples = GENOTYPE_SAMPLE[genotype]
+            genotype_samples = GENOTYPE_TO_SAMPLE[genotype]
             filtered_files = []
             for f in input.filtered:
                 if any(substr in f for substr in genotype_samples):
@@ -1150,8 +1018,8 @@ rule raw_fastqc:
         fwd_reads = 'input/reads/{sample}.R1.fastq.gz',
         rev_reads = 'input/reads/{sample}.R2.fastq.gz'
     output:
-        'output/raw_fastqc/{sample}.R1_fastqc.html',
-        'output/raw_fastqc/{sample}.R2_fastqc.html',
+        'output/raw_fastqc/{sample}.R1_fastqc.zip',
+        'output/raw_fastqc/{sample}.R2_fastqc.zip',
     params:
         outdir = 'output/raw_fastqc'
     shell:
@@ -1161,57 +1029,59 @@ rule clean_fastqc:
     input:
         fwd_reads = 'output/quality_trim/{sample}.R1.fastq.gz',
         rev_reads = 'output/quality_trim/{sample}.R2.fastq.gz',
-        unpaired_reads = 'output/quality_trim/{sample}.merged.fastq.gz'
+        unpaired_reads = 'output/quality_trim/{sample}.unpaired.fastq.gz'
     output:
-        'output/clean_fastqc/{sample}.R1_fastqc.html',
-        'output/clean_fastqc/{sample}.R2_fastqc.html',
-        'output/clean_fastqc/{sample}.merged_fastqc.html'
+        'output/clean_fastqc/{sample}.R1_fastqc.zip',
+        'output/clean_fastqc/{sample}.R2_fastqc.zip',
+        'output/clean_fastqc/{sample}.unpaired_fastqc.zip'
     params:
         outdir = 'output/clean_fastqc'
     shell:
-        "fastqc -o {params.outdir} {input.fwd_reads} {input.rev_reads} "
-        "{input.merged_reads}"
-
+        'fastqc '
+        '-o {params.outdir} '
+        '{input.fwd_reads} {input.rev_reads} {input.unpaired_reads}'
 
 
 rule quast:
     input:
-        unpack(get_iterations_reads),
-        assembly = match_qc_assembly,
-        index = match_qc_assembly_index
+        unpack(match_reads), unpack(match_assembly)
     output:
-        'output/quast{iter}/{genotype}/report.html'
+        'output/quast{iter}/{genotype}/report.tsv'
     threads: 6
     params:
         outdir = "output/quast{iter}/{genotype}"
     resources:
         mem_mb = 40000
     shell:
-        "quast.py -o {params.outdir} --eukaryote -1 {input.fwd_reads} "
-        "-2 {input.rev_reads} -t {threads} --no-snps {input.assembly}"
-
+        'quast.py '
+        '-o {params.outdir} '
+        '--eukaryote '
+        '-1 {input.fwd_reads} -2 {input.rev_reads} '
+        '-t {threads} '
+        '--no-snps {input.assembly}'
 
 rule qualimap:
     input:
-        'output/align_to_assembly_reduced/{sample}.bam'
+        'output/align_to_assembly_unmasked/{sample}.bam'
     output:
         'output/qualimap/{sample}/genome_results.txt'
     threads: 8
-    run:
-        shell("qualimap bamqc -nt 8 -bam {input.assembly} "
-              "-outdir output/qualimap/" + wildcards.sample)
+    shell:
+        'qualimap bamqc '
+        '-nt {threads} '
+        '-bam {input} '
+        '-outdir output/qualimap/{wildcards.sample}'
 
 rule busco:
     input:
-        assembly = match_qc_assembly,
-        index = match_qc_assembly_index
-    output: 'output/busco{iter}/{genotype}/short_summary_{genotype}.txt'
+        unpack(match_assembly)
+    output:
+        'output/busco{iter}/{genotype}/short_summary_{genotype}.txt'
     params:
         outdir = 'output/busco{iter}/{genotype}'
     run:
         outdir = local.path(params.outdir)
-        outdir.delete()
-        outdir.mkdir()
+        clear_directory(outdir)
         outdir_root = outdir.dirname
         local.env['BUSCO_CONFIG_FILE'] = local.path(config['busco_config'])
         local.env['AUGUSTUS_CONFIG_PATH'] = local.path(
@@ -1225,28 +1095,36 @@ rule busco:
 
         with local.cwd(outdir_root):
             busco['-i', assembly, '-o', wildcards.genotype, '-l', lineage_file,
-            '-m', 'geno', '-f'] & FG
+                  '-m', 'geno', '-f'] & FG
             for f in tmp_outdir.list():
                 f.move(outdir)
             tmp_outdir.delete()
 
+rule samtools_stats:
+    input:
+        'output/align_to_assembly_unmasked/{sample}.bam'
+    output:
+        'output/samtools_stats/{sample}.stats'
+    shell:
+        'samtools stats {input} > {output}'
+
 rule multiqc:
     input:
-        expand('output/raw_fastqc/{sample}.R1_fastqc.html', sample=SAMPLE),
-        expand('output/raw_fastqc/{sample}.R2_fastqc.html', sample=SAMPLE),
-        expand('output/clean_fastqc/{sample}.R1_fastqc.html', sample=SAMPLE),
-        expand('output/clean_fastqc/{sample}.R2_fastqc.html', sample=SAMPLE),
-        expand('output/clean_fastqc/{sample}.merged_fastqc.html',
+        expand('output/{stage}_fastqc/{sample}.{dir}_fastqc.zip', sample=SAMPLE,
+                dir=['R1', 'R2'], stage=['raw', 'clean']),
+        expand('output/clean_fastqc/{sample}.unpaired_fastqc.zip',
                sample=SAMPLE),
         expand('output/merge_reads/{sample}.hist', sample=SAMPLE),
-        expand('output/quast{iter}/{genotype}/report.html',
-               iter=ALL_FILTER_ITER, genotype=GENOTYPE),
+        expand('output/quast{iter}/{genotype}/report.tsv',
+               iter=PLOT_ITER, genotype=GENOTYPE),
         expand('output/busco{iter}/{genotype}/short_summary_{genotype}.txt',
-               iter=ALL_FILTER_ITER, genotype=GENOTYPE),
-        expand('output/mark_duplicates/{sample}.bam', sample=SAMPLE),
-        expand('output/align_to_assembly_reduced/{sample}.bam', sample=SAMPLE),
-        expand('output/qualimap/{sample}/genome_results.txt', sample=SAMPLE)
-    output: 'output/multiqc/multiqc.html'
+               iter=PLOT_ITER, genotype=GENOTYPE),
+        expand('output/mark_duplicates{iter}/log/{sample}.log',
+               sample=SAMPLE, iter=['_masked', '_unmasked']),
+        expand('output/samtools_stats/{sample}.stats', sample=SAMPLE),
+        expand('output/qualimap/{sample}/genome_results.txt', sample=SAMPLE),
+    output:
+        'output/multiqc/multiqc.html'
     shell:
-        'multiqc -f -d -n {output} .'
+        'multiqc -f -d -n {output} {input}'
 # }}}
