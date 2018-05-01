@@ -29,12 +29,6 @@ SAMPLE, PAIR = glob_wildcards(
 # Remove duplicate entries
 SAMPLE = sorted(list(set(SAMPLE)))
 
-# SAMPLE = [x for x in SAMPLE if "FA" not in x]
-# SAMPLE = [x for x in SAMPLE if "GB" not in x]
-# SAMPLE = [x for x in SAMPLE if "GC" not in x]
-# SAMPLE = [x for x in SAMPLE if "IA" not in x]
-# SAMPLE = [x for x in SAMPLE if "IC" not in x]
-
 # Genotype indices given by first two letters of sample name
 GENOTYPE = list(set([x[0:2] for x in SAMPLE]))
 
@@ -156,7 +150,7 @@ def match_assembly(wildcards):
     starting_control = get_starting_control(wildcards)
     if hasattr(wildcards, 'call') or hasattr(wildcards, 'vartype'):
         dir = os.path.join('output', 'repeatmasker')
-    elif wildcards.iter in ['_masked', '_unmasked']:
+    elif wildcards.iter == '_unmasked':
         dir = os.path.join('output', 'length_filter_assembly_reduced')
     else:
         dir = os.path.join('output', 'length_filter_assembly' + wildcards.iter)
@@ -204,7 +198,9 @@ rule all:
         expand('output/calc_number_filtered_sites{call}/{sample}.{type}.txt',
                call=CALL_ITER, sample=SAMPLE, type=VARIANT_TYPES),
         expand('output/select_unique_variants{call}/{sample}.{type}.tsv',
-               sample=SAMPLE, call=CALL_ITER, type=VARIANT_TYPES)
+               sample=SAMPLE, call=CALL_ITER, type=VARIANT_TYPES),
+        expand('output/determine_callable_sites{call}/{sample}.txt',
+                call=CALL_ITER, sample=SAMPLE)
         # }}}
 
 
@@ -847,6 +843,23 @@ rule select_variants:
               '-O {output} ' +
               criteria)
 
+rule determine_callable_sites:
+    input:
+        unpack(match_assembly),
+        bam = 'output/align_to_assembly_masked/{sample}.bam',
+        bai = 'output/align_to_assembly_masked/{sample}.bam.bai'
+    output:
+        bed = 'output/determine_callable_sites{call}/{sample}.bed',
+        summary = 'output/determine_callable_sites{call}/{sample}.txt'
+    shell:
+        'java -jar {config[gatk3_jar]} -T CallableSites '
+        '-R {input.assembly} '
+        '-I {input.bam} '
+        '-o {output.bed} '
+        '-summary {output.summary} '
+        '--minDepth {config[min_depth]} '
+        '--maxDepth {config[max_depth]}'
+
 rule exclude_nonvariants:
     input:
         unpack(match_assembly),
@@ -943,7 +956,8 @@ rule depth_filter_variants:
             '-V {input.vcf} '
             '-O {output.vcf} '
             '--filter-name depth_filter '
-            '--filter-expression "DP < 10 || DP > 100"'
+            '--filter-expression '
+            '"DP < {config[min_depth]} || DP > {config[max_depth]}"'
 
 rule remove_filtered_variants:
     input:
