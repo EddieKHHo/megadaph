@@ -9,8 +9,8 @@ names_dmp: input/taxonomy/names.dmp
 redundans_bin: util/redundans/redundans.py
 busco_database: input/buscodb/arthropoda_odb9
 busco_config: config/busco/config.ini
-augustus_config: /mnt/lfs2/schaack/.linuxbrew/Cellar/augustus/3.3/config
-augustus_scripts: /mnt/lfs2/schaack/.linuxbrew/Cellar/augustus/3.3/scripts
+augustus_config: /mnt/lfs2/schaack/.linuxbrew/Cellar/augustus/3.3_2/config
+augustus_scripts: /mnt/lfs2/schaack/.linuxbrew/Cellar/augustus/3.3_2/scripts
 mitochondrial_reference: input/ref/magna.mt.europe.fa
 nuclear_reference: input/ref/magna.nuc.fa
 repeat_library: input/repeat_library/UC-families.fa

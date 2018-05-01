@@ -11,6 +11,7 @@ from plumbum import (
     local,
 )
 from plumbum.cmd import (
+    blobtools,
     busco,
     cat,
 )
@@ -146,21 +147,22 @@ def match_assembly(wildcards):
         if wildcards.iter == '_ref':
             outdict['assembly'] = config['nuclear_reference']
             prefix = os.path.splitext(outdict['assembly'])[0]
-            dir = local.path(outdict['assembly']).dirname
+            dir = os.path.dirname(outdict['assembly'])
             outdict['indices'] = [
-                str(dir / (prefix + suffix)) for suffix in INDEX_SUFFIXES]
+                os.path.join(dir, (prefix + suffix))
+                for suffix in INDEX_SUFFIXES]
             return outdict
 
     starting_control = get_starting_control(wildcards)
     if hasattr(wildcards, 'call') or hasattr(wildcards, 'vartype'):
-        dir = local.path('output') / ('repeatmasker')
+        dir = os.path.join('output', 'repeatmasker')
     elif wildcards.iter in ['_masked', '_unmasked']:
-        dir = local.path('output') / 'length_filter_assembly_reduced'
+        dir = os.path.join('output', 'length_filter_assembly_reduced')
     else:
-        dir = local.path('output') / ('length_filter_assembly' + wildcards.iter)
-    outdict['assembly'] = str(dir / (starting_control + '.fasta'))
-    outdict['indices'] = [str(dir / (starting_control + suffix)) for suffix in
-                          INDEX_SUFFIXES]
+        dir = os.path.join('output', 'length_filter_assembly' + wildcards.iter)
+    outdict['assembly'] = os.path.join(dir, (starting_control + '.fasta'))
+    outdict['indices'] = [os.path.join(dir, starting_control + suffix)
+            for suffix in INDEX_SUFFIXES]
     return outdict
 
 
@@ -201,7 +203,7 @@ rule all:
                sample=SAMPLE, call=CALL_ITER),
         expand('output/calc_number_filtered_sites{call}/{sample}.{type}.txt',
                call=CALL_ITER, sample=SAMPLE, type=VARIANT_TYPES),
-        expand('output/select_unique_variants{call}/{sample}.{type}.table',
+        expand('output/select_unique_variants{call}/{sample}.{type}.tsv',
                sample=SAMPLE, call=CALL_ITER, type=VARIANT_TYPES)
         # }}}
 
@@ -223,19 +225,7 @@ rule index_fasta:
     input:
         fasta = 'output/{dir}/{group}.fasta'
     output:
-        'output/{dir}/{group}.fasta.fai',
-        'output/{dir}/{group}.rev.2.bt2',
-        'output/{dir}/{group}.fasta.amb',
-        'output/{dir}/{group}.dict',
-        'output/{dir}/{group}.3.bt2',
-        'output/{dir}/{group}.rev.1.bt2',
-        'output/{dir}/{group}.fasta.pac',
-        'output/{dir}/{group}.2.bt2',
-        'output/{dir}/{group}.fasta.sa',
-        'output/{dir}/{group}.1.bt2',
-        'output/{dir}/{group}.fasta.ann',
-        'output/{dir}/{group}.4.bt2',
-        'output/{dir}/{group}.fasta.bwt'
+        ['output/{dir}/{group}' + suffix for suffix in INDEX_SUFFIXES]
     run:
         index_prefix = os.path.splitext(input.fasta)[0]
         picard_dict = index_prefix + '.dict'
@@ -284,10 +274,10 @@ rule vcf_to_tab:
         unpack(match_assembly),
         vcf = 'output/{dir}/{sample}.{vartype}.vcf'
     output:
-        'output/{dir}/{sample}.{vartype}.vcf.tsv'
+        'output/{dir}/{sample}.{vartype}.tsv'
     shell:
         'gatk VariantsToTable '
-        '-R {input.ref} '
+        '-R {input.assembly} '
         '-V {input.vcf} '
         '-O {output} '
         '-F CHROM -F POS -GF GT -F QUAL -F MQ -F DP -F TRANSTION -GF AD '
@@ -427,7 +417,7 @@ rule assembly:
 rule length_filter_assembly:
     input:
         lambda wildcards: (
-            ''.join(['output/filter_contamination_reduced/',
+            ''.join(['output/filter_mitochondrial_scaffolds/',
                      wildcards.genotype, 'SC.fasta'])
             if wildcards.iter in ['_reduced', '_unmasked', '_masked'] else
             ''.join(['output/assembly', wildcards.iter, '/', wildcards.genotype,
@@ -458,7 +448,7 @@ rule blast_assembly:
         '-max_target_seqs {params.max_target_seqs} '
         '-max_hsps {params.max_hsps} '
         '-evalue {params.evalue} '
-        '-query {input} '
+        '-query {input.assembly} '
         '-out {output} '
         '-outfmt \'6 qseqid staxids bitscore std\' '
         '-num_threads {threads}'
@@ -616,7 +606,7 @@ rule find_contam_contigs:
     input:
         'output/produce_blobtable{iter}/{genotype}.blobDB.bestsum.table.txt'
     output:
-        'output/find_contam_contigs{iter}/{genotype}.txt'
+        'output/find_contam_contigs{iter}/{genotype}SC.txt'
     shell:
         'scripts/find_contam_contigs{wildcards.iter}.R {input} > {output}'
 
@@ -624,15 +614,15 @@ rule find_contam_contigs:
 # List the contigs which passed the filtering step
 rule generate_inclusion_list:
     input:
-        unpack(match_filter_alignment),
+        unpack(match_assembly),
         exclusions = lambda wildcards: (
-            os.path.join('output/find_mitochondrial_scaffolds',
-                         wildcards.genotype + '.txt')
+            os.path.join('output/filter_mitochondrial_scaffolds',
+                         wildcards.genotype + 'SC.txt')
             if wildcards.iter == '_reduced'
-            else ''.join(['output/find_contam_contigs', wildcards.iter,
-                          '/{genotype}.txt']))
+            else os.path.join('output', 'find_contam_contigs' + wildcards.iter,
+                              wildcards.genotype + 'SC.txt'))
     output:
-        'output/generate_inclusion_list{iter}/{genotype}.txt'
+        'output/generate_inclusion_list{iter}/{genotype}SC.txt'
     shell:
         'list_csomes {input.assembly} | '
         'complement.sh /dev/stdin {input.exclusions} > {output}'
@@ -641,9 +631,9 @@ rule generate_inclusion_list:
 rule filter_contamination:
     input:
         unpack(match_filter_alignment),
-        passing_contigs = lambda wildcards: '/'.join([
+        passing_contigs = lambda wildcards: os.path.join(
             'output/generate_inclusion_list' + wildcards.iter,
-            get_genotype(wildcards) + '.txt']),
+            get_genotype(wildcards) + 'SC.txt'),
     output:
         fwd = 'output/filter_contamination{iter}/{sample}.R1.fastq.gz',
         rev = 'output/filter_contamination{iter}/{sample}.R2.fastq.gz',
@@ -713,8 +703,8 @@ rule blast_against_mitochondria:
     input:
         'output/redundans/{genotype}SC.fasta'
     output:
-        list = 'output/blast_against_mitochondria/{genotype}.txt',
-        blast = 'output/blast_against_mitochondria/{genotype}.tsv'
+        list = 'output/blast_against_mitochondria/{genotype}SC.txt',
+        blast = 'output/blast_against_mitochondria/{genotype}SC.tsv'
     run:
         # BLAST assembly vs. mtdna
         shell('blastn -subject {input} '
@@ -725,11 +715,11 @@ rule blast_against_mitochondria:
 
 rule filter_mitochondrial_scaffolds:
     input:
-        blast = 'output/blast_against_mitochondria/{genotype}.tsv',
+        blast = 'output/blast_against_mitochondria/{genotype}SC.tsv',
         assembly = 'output/redundans/{genotype}SC.fasta'
     output:
-        fasta = 'output/find_mitochondrial_scaffolds/{genotype}.fasta',
-        txt = 'output/find_mitochondrial_scaffolds/{genotype}.txt'
+        fasta = 'output/filter_mitochondrial_scaffolds/{genotype}SC.fasta',
+        txt = 'output/filter_mitochondrial_scaffolds/{genotype}SC.txt'
     shell:
         'scripts/filter_mitochondrial_scaffolds.py '
         '--blast {input.blast} '
@@ -774,7 +764,7 @@ rule mark_duplicates:
     resources:
         mem_mb = 30000
     log:
-        'output/mark_duplicates/log/{sample}.log'
+        'output/mark_duplicates{iter}/log/{sample}.log'
     shell:
         'picard MarkDuplicates '
         'I={input.bam} '
@@ -801,7 +791,7 @@ rule call_variants:
         snp_heterozygosity = 0.015,
         indel_heterozygosity = 0.01
     log:
-        'output/call_variants{iter}/log/{sample}.log'
+        'output/call_variants{call}/log/{sample}.log'
     shell:
         'gatk HaplotypeCaller '
         '-R {input.assembly} '
@@ -823,7 +813,7 @@ rule genotype_gvcfs:
         indel_heterozygosity = 0.01
     shell:
         'gatk GenotypeGVCFs '
-        '-R {input.ref} '
+        '-R {input.assembly} '
         '-V {input.gvcf} '
         '-O {output} '
         '--heterozygosity {params.snp_heterozygosity} '
@@ -862,8 +852,7 @@ rule exclude_nonvariants:
         unpack(match_assembly),
         vcf = 'output/select_variants{call}/{sample}.{vartype}.vcf',
     output:
-        vcf = 'output/exclude_nonvariants{call}/{sample}.{vartype}.vcf',
-        table = 'output/exclude_nonvariants{call}/{sample}.{vartype}.vcf.tsv'
+        vcf = 'output/exclude_nonvariants{call}/{sample}.{vartype}.vcf'
     shell:
         'gatk SelectVariants '
         '-R {input.assembly} '
@@ -973,13 +962,13 @@ rule remove_filtered_variants:
 rule select_unique_variants:
     input:
         filtered = expand(
-            'output/remove_filtered_variants{{call}}/{sample}.{{vartype}}.vcf.tsv',
+            'output/remove_filtered_variants{{call}}/{sample}.{{vartype}}.tsv',
             sample=SAMPLE),
         unfiltered = expand(
-            'output/exclude_nonvariants{{call}}/{sample}.{{vartype}}.vcf.tsv',
+            'output/exclude_nonvariants{{call}}/{sample}.{{vartype}}.tsv',
             sample=SAMPLE)
     output:
-        expand('output/select_unique_variants{{call}}/{sample}.{{vartype}}.vcf.tsv',
+        expand('output/select_unique_variants{{call}}/{sample}.{{vartype}}.tsv',
                 sample=SAMPLE)
     run:
         # Remove all sites in each filtered sample which are also present in any
@@ -1062,7 +1051,7 @@ rule quast:
 
 rule qualimap:
     input:
-        'output/align_to_assembly_unmasked/{sample}.bam'
+        'output/mark_duplicates_unmasked/{sample}.bam'
     output:
         'output/qualimap/{sample}/genome_results.txt'
     threads: 8
