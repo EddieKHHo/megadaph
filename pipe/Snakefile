@@ -148,7 +148,9 @@ def match_assembly(wildcards):
             return outdict
 
     starting_control = get_starting_control(wildcards)
-    if hasattr(wildcards, 'call') or hasattr(wildcards, 'vartype'):
+    if (hasattr(wildcards, 'call') or hasattr(wildcards, 'vartype')):
+        dir = os.path.join('output', 'repeatmasker')
+    elif wildcards.iter == '_masked':
         dir = os.path.join('output', 'repeatmasker')
     elif wildcards.iter == '_unmasked':
         dir = os.path.join('output', 'length_filter_assembly_reduced')
@@ -723,6 +725,25 @@ rule filter_mitochondrial_scaffolds:
         '--outfasta {output.fasta} '
         '--outtxt {output.txt}'
 
+rule filter_zero_coverage:
+    input:
+        bam = 'output/align_to_assembly_reduced/{genotype}SC.bam',
+        bai = 'output/align_to_assembly_reduced/{genotype}SC.bam.bai',
+        fasta = 'output/filter_mitochondrial_scaffolds/{genotype}SC.fasta'
+    output:
+        fasta = 'output/filter_zero_coverage/{genotype}SC.fasta'
+    run:
+        cov_output_prefix = 'output/filter_zero_coverage/'
+        cov = os.path.join(cov_output_prefix,
+                           os.path.basename(input.fasta) + '.cov')
+        shell('blobtools map2cov '
+              '-i {input.assembly} '
+              '-b {input.bam} '
+              '-o ' + cov_output_prefix)
+        shell(('scripts/get_low_depth_contigs.awk {} | '
+              'grep --after-context=1 > {}').format(cov, output.fasta))
+
+
 rule repeatmasker:
     input:
         'output/length_filter_assembly_reduced/{genotype}SC.fasta'
@@ -831,12 +852,13 @@ rule select_variants:
         'output/select_variants{call}/{sample}.{vartype}.vcf'
     run:
         if wildcards.vartype == 'snps':
-            criteria = '--select-vartype-to-include SNP'
+            criteria = '--select-type-to-include SNP'
         elif wildcards.vartype == 'indels':
-            criteria = '--select-vartype-to-include INDEL'
+            criteria = '--select-type-to-include INDEL'
         elif wildcards.vartype == 'other':
             criteria = (
-                '--select-vartype-to-exclude SNP --select-vartype-to-exclude INDEL')
+                '--select-type-to-exclude SNP '
+                '--select-type-to-exclude INDEL')
         shell('gatk SelectVariants '
               '-R {input.assembly} '
               '-V {input.vcf} '
@@ -852,7 +874,7 @@ rule determine_callable_sites:
         bed = 'output/determine_callable_sites{call}/{sample}.bed',
         summary = 'output/determine_callable_sites{call}/{sample}.txt'
     shell:
-        'java -jar {config[gatk3_jar]} -T CallableSites '
+        'java -jar {config[gatk3_jar]} -T CallableLoci '
         '-R {input.assembly} '
         '-I {input.bam} '
         '-o {output.bed} '
@@ -929,7 +951,7 @@ rule filter_variants:
               '-R {input.assembly} '
               '-V {input.vcf} '
               '-O {output} '
-              '--filter-name snp_filter '
+              '--filter-name {wildcards.vartype}_filter '
               '--filter-expression ' + filter_expression)
 
 rule calc_number_filtered_sites:
@@ -1065,15 +1087,15 @@ rule quast:
 
 rule qualimap:
     input:
-        'output/mark_duplicates_unmasked/{sample}.bam'
+        'output/mark_duplicates{iter}/{sample}.bam'
     output:
-        'output/qualimap/{sample}/genome_results.txt'
+        'output/qualimap{iter}/{sample}/genome_results.txt'
     threads: 8
     shell:
         'qualimap bamqc '
         '-nt {threads} '
         '-bam {input} '
-        '-outdir output/qualimap/{wildcards.sample}'
+        '-outdir output/qualimap{wildcards.iter}/{wildcards.sample}'
 
 rule busco:
     input:
@@ -1125,7 +1147,8 @@ rule multiqc:
         expand('output/mark_duplicates{iter}/log/{sample}.log',
                sample=SAMPLE, iter=['_masked', '_unmasked']),
         expand('output/samtools_stats/{sample}.stats', sample=SAMPLE),
-        expand('output/qualimap/{sample}/genome_results.txt', sample=SAMPLE),
+        expand('output/qualimap{iter}/{sample}/genome_results.txt',
+                sample=SAMPLE, iter=['_masked', '_unmasked'])
     output:
         'output/multiqc/multiqc.html'
     shell:
