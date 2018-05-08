@@ -1,6 +1,6 @@
 library("gridExtra")
 library("ggplot2")
-library("tidyr")
+library("tidyverse")
 
 input_dir <- dirname(snakemake@input[[1]])
 output_dir <- dirname(snakemake@output[[1]])
@@ -19,8 +19,6 @@ vcf <- vcf %>%
 
 snp_color <- "#A9E2E4"
 indel_color <- "#F4CCCA"
-
-vcf %>% separate(col='')
 
 QUAL <- ggplot(vcf, aes(x = QUAL, fill = variant)) +
   geom_density(alpha = 0.3) +
