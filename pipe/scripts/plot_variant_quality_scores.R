@@ -11,6 +11,7 @@ vcf <- rbind(vcf_snps, vcf_indels)
 vcf$variant <- factor(
     c(rep("SNPs", dim(vcf_snps)[1]),
       rep("Indels", dim(vcf_indels)[1])))
+cols <- colnames(vcf)
 ad_col = cols[which(map_lgl(cols, ~grepl('AD', .)))]
 vcf <- vcf %>%
   separate(col=ad_col, into=c('MUT', 'WT')) %>%
