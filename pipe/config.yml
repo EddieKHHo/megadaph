@@ -7,7 +7,7 @@ blast_database: input/blastdb/nt
 nodes_dmp: input/taxonomy/nodes.dmp
 names_dmp: input/taxonomy/names.dmp
 redundans_bin: util/redundans/redundans.py
-gatk3_jar: util/gatk3/GenomeAnalysisTK-3.8-1-0-gf15c1c3ef/GenomeAnalysisTK.jar
+gatk3_jar: util/gatk3/gatk.jar
 busco_database: input/buscodb/arthropoda_odb9
 busco_config: config/busco/config.ini
 augustus_config: /mnt/lfs2/schaack/.linuxbrew/Cellar/augustus/3.3_2/config
