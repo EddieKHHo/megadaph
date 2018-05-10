@@ -3,7 +3,7 @@
 ## of blobtools map2cov
 {
     if (NR > 6) {
-        if ($3 < 3) {
+        if ($3 <= 3) {
             print $1;
         }
     }
