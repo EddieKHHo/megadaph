@@ -47,14 +47,6 @@ PLOT_ITER = ['1', '2', '_final']
 DECONTAM_ITER = ['1', '2', '_reduced']
 ASSEMBLY_ITER = ['1', '2', '3']
 
-
-# Variant calling was also done iteratively.
-# In the first step, variants with default parameters and high confidence
-# variants were called.
-# In the second step, this initial variant set was used to estimate
-# heterozygosity and variant were re-called.
-CALL_ITER = ['_initial']
-
 VARIANT_TYPES = ['snps', 'indels', 'other']
 
 # Suffixes for various types of fasta indices
@@ -147,13 +139,22 @@ def match_assembly(wildcards):
             return outdict
 
     starting_control = get_starting_control(wildcards)
-    if (hasattr(wildcards, 'call') or hasattr(wildcards, 'vartype')):
+    if wildcards.iter == '_final':
         dir = os.path.join('output', 'filter_zero_coverage')
     else:
         dir = os.path.join('output', 'length_filter_assembly' + wildcards.iter)
     outdict['assembly'] = os.path.join(dir, (starting_control + '.fasta'))
     outdict['indices'] = [os.path.join(dir, starting_control + suffix)
             for suffix in INDEX_SUFFIXES]
+    return outdict
+
+
+def match_final_assembly(wildcards):
+    starting_control = get_starting_control(wildcards)
+    outdict = {}
+    prefix = os.path.join('output', 'filter_zero_coverage', starting_control)
+    outdict['assembly'] = prefix + '.fasta'
+    outdict['indices'] = [prefix + suffix for suffix in INDEX_SUFFIXES]
     return outdict
 
 
@@ -190,16 +191,17 @@ rule all:
                genotype=GENOTYPE, iter=PLOT_ITER),
         expand("output/produce_covplots{iter}/{sample}.covsum.png",
                sample=SAMPLE, iter=PLOT_ITER),
-        expand('output/plot_variant_quality_scores{call}/{sample}.svg',
-               sample=SAMPLE, call=CALL_ITER),
-        expand('output/calc_number_filtered_sites{call}/{sample}.{type}.txt',
-               call=CALL_ITER, sample=SAMPLE, type=VARIANT_TYPES),
-        expand('output/select_unique_variants{call}/{sample}.{type}.tsv',
-               sample=SAMPLE, call=CALL_ITER, type=VARIANT_TYPES),
-        expand('output/determine_callable_sites{call}/{sample}.txt',
-                call=CALL_ITER, sample=SAMPLE)
+        expand('output/plot_variant_quality_scores/{sample}.svg',
+               sample=SAMPLE),
+        expand('output/calc_number_filtered_sites/{sample}.{type}.txt',
+               sample=SAMPLE, type=VARIANT_TYPES),
+        expand('output/select_unique_variants/{sample}.{type}.tsv',
+               sample=SAMPLE, type=VARIANT_TYPES),
+        expand('output/determine_callable_sites/{sample}.txt',
+                sample=SAMPLE),
+        expand('output/joint_genotype_gvcfs/{genotype}.vcf',
+                genotype=GENOTYPE)
         # }}}
-
 
 # ==============================================================================
 # Utility Rules
@@ -250,21 +252,7 @@ rule align_to_assembly:
               'samtools view -bh - | '
               'samtools sort - > {output.bam} 2> {log}')
 
-rule vcf_to_tab:
-    input:
-        unpack(match_assembly),
-        vcf = 'output/{dir}/{sample}.{vartype}.vcf'
-    output:
-        'output/{dir}/{sample}.{vartype}.tsv'
-    shell:
-        'gatk VariantsToTable '
-        '-R {input.assembly} '
-        '-V {input.vcf} '
-        '-O {output} '
-        '-F CHROM -F POS -GF GT -F QUAL -F MQ -F DP -F TRANSTION -GF AD '
-        '-F "HOM-REF" -F "HOM-VAR" -F TYPE'
 # }}}
-
 
 # ==============================================================================
 # Build extra input files
@@ -547,7 +535,7 @@ rule produce_blobplots:
                     'blobplot', '-p', '20', '-r', rank, '-i', input.db, '-o',
                     outdir]))
         for process in processes:
-            process.join()
+            process.communicate()
 
 rule produce_covplots:
     input:
@@ -765,7 +753,7 @@ rule repeatmasker2bed:
     output:
         'output/repeatmasker/{genotype}SC.bed'
     shell:
-        'rmsk2bed < {input} > {output}'
+        'rmsk2bed < {input} | cut -f 1-3 > {output}'
 
 # }}}
 
@@ -792,6 +780,7 @@ rule mark_duplicates:
         'REMOVE_DUPLICATES=True '
         'M={log}'
 
+
 # }}}
 
 # ==============================================================================
@@ -800,26 +789,26 @@ rule mark_duplicates:
 # {{{
 rule call_variants:
     input:
-        unpack(match_assembly),
+        unpack(match_final_assembly),
         bam = 'output/mark_duplicates/{sample}.bam',
         bai = 'output/mark_duplicates/{sample}.bam.bai',
         repeats = lambda wildcards: (
                 os.path.join('output', 'repeatmasker',
                              get_genotype(wildcards) + 'SC.bed'))
     output:
-        gvcf = 'output/call_variants{call}/{sample}.g.vcf'
+        gvcf = 'output/call_variants/{sample}.g.vcf'
     resources:
         mem_mb = 20000
     params:
         snp_heterozygosity = 0.015,
         indel_heterozygosity = 0.01
     log:
-        'output/call_variants{call}/log/{sample}.log'
+        'output/call_variants/log/{sample}.log'
     shell:
         'gatk HaplotypeCaller '
         '-R {input.assembly} '
         '-I {input.bam} '
-        '--exclude-intervals {input.repeats}'
+        '--exclude-intervals {input.repeats} '
         '--emit-ref-confidence GVCF '
         '-O {output} '
         '--heterozygosity {params.snp_heterozygosity} '
@@ -828,10 +817,10 @@ rule call_variants:
 
 rule genotype_gvcfs:
     input:
-        unpack(match_assembly),
-        gvcf = 'output/call_variants{call}/{sample}.g.vcf',
+        unpack(match_final_assembly),
+        gvcf = 'output/call_variants/{sample}.g.vcf',
     output:
-        'output/genotype_gvcfs{call}/{sample}.vcf'
+        'output/genotype_gvcfs/{sample}.vcf'
     params:
         snp_heterozygosity = 0.015,
         indel_heterozygosity = 0.01
@@ -843,9 +832,58 @@ rule genotype_gvcfs:
         '--heterozygosity {params.snp_heterozygosity} '
         '--indel-heterozygosity {params.indel_heterozygosity} '
 
+rule combine_gvcfs:
+    input:
+        unpack(match_final_assembly),
+        gvcf = lambda wildcards: [os.path.join(
+            'output', 'call_variants', sample + '.g.vcf')
+            for sample in GENOTYPE_TO_SAMPLE[wildcards.genotype]],
+        repeats = 'output/repeatmasker/{genotype}SC.bed'
+    output:
+        'output/combine_gvcfs/{genotype}.g.vcf'
+    resources:
+        mem_mb = 20000
+    run:
+        vcf_param = '-V ' + ' -V '.join(input.gvcf) + ' '
+        shell('java -jar {config[gatk3_jar]} -T CombineGVCFs ' +
+              vcf_param +
+              '-R {input.assembly} '
+              '-o {output} '
+              '--excludeIntervals {input.repeats}')
+
+rule sort_combined_gvcfs:
+    input:
+        'output/combine_gvcfs/{genotype}.g.vcf'
+    output:
+        'output/sort_combined_gvcfs/{genotype}.g.vcf'
+    resources:
+        mem_mb = 20000
+    shell:
+        'picard SortVcf I={input} O={output}'
+
+
+rule joint_genotype_gvcfs:
+    input:
+        unpack(match_final_assembly),
+        gvcf = 'output/sort_combined_gvcfs/{genotype}.g.vcf'
+    output:
+        'output/joint_genotype_gvcfs/{genotype}.vcf'
+    params:
+        snp_heterozygosity = 0.015,
+        indel_heterozygosity = 0.01
+    resources:
+        mem_mb = 20000
+    shell:
+        'java -jar {config[gatk3_jar]} -T GenotypeGVCFs '
+        '-R {input.assembly} '
+        '-V {input.gvcf} '
+        '-o {output} '
+        '--heterozygosity {params.snp_heterozygosity} '
+        '--indel_heterozygosity {params.indel_heterozygosity}'
+
 rule extract_variant_coverage:
     input:
-        'output/genotype_gvcfs{call}/{sample}.vcf'
+        'output/genotype_gvcfs/{sample}.vcf'
     output:
         'output/extract_variant_coverage{iter}/{sample}.txt',
     shell:
@@ -853,10 +891,10 @@ rule extract_variant_coverage:
 
 rule select_variants:
     input:
-        unpack(match_assembly),
-        vcf = 'output/genotype_gvcfs{call}/{sample}.vcf',
+        unpack(match_final_assembly),
+        vcf = 'output/genotype_gvcfs/{sample}.vcf',
     output:
-        'output/select_variants{call}/{sample}.{vartype}.vcf'
+        'output/select_variants/{sample}.{vartype}.vcf'
     run:
         if wildcards.vartype == 'snps':
             criteria = '--select-type-to-include SNP'
@@ -874,15 +912,15 @@ rule select_variants:
 
 rule determine_callable_sites:
     input:
-        unpack(match_assembly),
+        unpack(match_final_assembly),
         bam = 'output/align_to_assembly_final/{sample}.bam',
         bai = 'output/align_to_assembly_final/{sample}.bam.bai',
         repeats = lambda wildcards: (
                 os.path.join('output', 'repeatmasker',
                              get_genotype(wildcards) + 'SC.bed'))
     output:
-        bed = 'output/determine_callable_sites{call}/{sample}.bed',
-        summary = 'output/determine_callable_sites{call}/{sample}.txt'
+        bed = 'output/determine_callable_sites/{sample}.bed',
+        summary = 'output/determine_callable_sites/{sample}.txt'
     shell:
         'java -jar {config[gatk3_jar]} '
         '--excludeIntervals {input.repeats} '
@@ -896,10 +934,10 @@ rule determine_callable_sites:
 
 rule exclude_nonvariants:
     input:
-        unpack(match_assembly),
-        vcf = 'output/select_variants{call}/{sample}.{vartype}.vcf',
+        unpack(match_final_assembly),
+        vcf = 'output/select_variants/{sample}.{vartype}.vcf',
     output:
-        vcf = 'output/exclude_nonvariants{call}/{sample}.{vartype}.vcf'
+        vcf = 'output/exclude_nonvariants/{sample}.{vartype}.vcf'
     shell:
         'gatk SelectVariants '
         '-R {input.assembly} '
@@ -909,36 +947,36 @@ rule exclude_nonvariants:
 
 rule extract_variant_quality_scores:
     input:
-        unpack(match_assembly),
-        vcf = 'output/select_variants{call}/{sample}.{vartype}.vcf'
+        unpack(match_final_assembly),
+        vcf = 'output/select_variants/{sample}.{vartype}.vcf'
     output:
-        'output/extract_variant_quality_scores{call}/{sample}.{vartype}.q.tsv'
+        'output/extract_variant_quality_scores/{sample}.{vartype}.q.tsv'
     shell:
         'gatk VariantsToTable '
         '-R {input.assembly} '
         '-V {input.vcf} '
-        '-F CHROM -F QUAL -F QD -F DP -F MQ -F MQRankSum -F FS '
+        '-F CHROM -F QUAL -F QD -F DP -F MQ -F MQRankSum -F FS -GF AD '
         '-F ReadPosRankSum -F SOR '
         '-O {output}'
 
 rule plot_variant_quality_scores:
     input:
         snps = (
-            'output/extract_variant_quality_scores{call}/{sample}.snps.q.tsv'),
+            'output/extract_variant_quality_scores/{sample}.snps.q.tsv'),
         indels = (
-            'output/extract_variant_quality_scores{call}/{sample}.indels.q.tsv')
+            'output/extract_variant_quality_scores/{sample}.indels.q.tsv')
     output:
-        'output/plot_variant_quality_scores{call}/{sample}.svg'
+        'output/plot_variant_quality_scores/{sample}.svg'
     script:
         'scripts/plot_variant_quality_scores.R'
 
 
 rule filter_variants:
     input:
-        unpack(match_assembly),
-        vcf = 'output/select_variants{call}/{sample}.{vartype}.vcf',
+        unpack(match_final_assembly),
+        vcf = 'output/select_variants/{sample}.{vartype}.vcf',
     output:
-        'output/filter_variants{call}/{sample}.{vartype}.vcf'
+        'output/filter_variants/{sample}.{vartype}.vcf'
     params:
     run:
         if wildcards.vartype == 'snps':
@@ -968,10 +1006,10 @@ rule filter_variants:
 
 rule calc_number_filtered_sites:
     input:
-        pre = 'output/select_variants{call}/{sample}.{vartype}.vcf',
-        post = 'output/filter_variants{call}/{sample}.{vartype}.vcf'
+        pre = 'output/select_variants/{sample}.{vartype}.vcf',
+        post = 'output/filter_variants/{sample}.{vartype}.vcf'
     output:
-        'output/calc_number_filtered_sites{call}/{sample}.{vartype}.txt'
+        'output/calc_number_filtered_sites/{sample}.{vartype}.txt'
     shell:
         'echo "Sites prefilter: " >> {output}; '
         'grep -vc "^#" {input.pre} >>  {output}; '
@@ -980,10 +1018,10 @@ rule calc_number_filtered_sites:
 
 rule depth_filter_variants:
     input:
-        unpack(match_assembly),
-        vcf = 'output/filter_variants{call}/{sample}.{vartype}.vcf',
+        unpack(match_final_assembly),
+        vcf = 'output/filter_variants/{sample}.{vartype}.vcf',
     output:
-        vcf = 'output/depth_filter_variants{call}/{sample}.{vartype}.vcf'
+        vcf = 'output/depth_filter_variants/{sample}.{vartype}.vcf'
     shell:
         'gatk VariantFiltration '
             '-R {input.assembly} '
@@ -995,10 +1033,10 @@ rule depth_filter_variants:
 
 rule remove_filtered_variants:
     input:
-        unpack(match_assembly),
-        vcf = 'output/depth_filter_variants{call}/{sample}.{vartype}.vcf',
+        unpack(match_final_assembly),
+        vcf = 'output/depth_filter_variants/{sample}.{vartype}.vcf',
     output:
-        'output/remove_filtered_variants{call}/{sample}.{vartype}.vcf'
+        'output/remove_filtered_variants/{sample}.{vartype}.vcf'
     shell:
         'gatk SelectVariants '
         '-R {input.assembly} '
@@ -1010,13 +1048,13 @@ rule remove_filtered_variants:
 rule select_unique_variants:
     input:
         filtered = expand(
-            'output/remove_filtered_variants{{call}}/{sample}.{{vartype}}.tsv',
+            'output/remove_filtered_variants/{sample}.{{vartype}}.vcf',
             sample=SAMPLE),
         unfiltered = expand(
-            'output/exclude_nonvariants{{call}}/{sample}.{{vartype}}.tsv',
+            'output/exclude_nonvariants/{sample}.{{vartype}}.vcf',
             sample=SAMPLE)
     output:
-        expand('output/select_unique_variants{{call}}/{sample}.{{vartype}}.tsv',
+        expand('output/select_unique_variants/{sample}.{{vartype}}.tsv',
                 sample=SAMPLE)
     run:
         # Remove all sites in each filtered sample which are also present in any
@@ -1042,6 +1080,20 @@ rule select_unique_variants:
                       '-i 0,1,9 '
                       '--target ' + target + ' ' +
                       ' '.join([target] + comparisons))
+
+rule vcf_to_tab:
+    input:
+        unpack(match_final_assembly),
+        vcf = 'output/{dir}/{sample}.{vartype}.vcf'
+    output:
+        'output/{dir}/{sample}.{vartype}.tsv'
+    shell:
+        'gatk VariantsToTable '
+        '-R {input.assembly} '
+        '-V {input.vcf} '
+        '-O {output} '
+        '-F CHROM -F POS -GF GT -F QUAL -F MQ -F DP -F TRANSTION -GF AD -F TYPE'
+
 
 # }}}
 
