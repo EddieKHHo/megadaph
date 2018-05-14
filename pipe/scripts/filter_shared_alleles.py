@@ -1,42 +1,66 @@
 #!/usr/bin/env python
-"""
-Find variants which are unique to sample from a multisample gatk variant
+"""Find variants which are unique to sample from a multisample gatk variant
 table.
 """
+import os
+
 import click
 from fmbiopy.io import write_table
-import pandas as pd
+from pandas import (
+    DataFrame,
+    read_csv,
+)
+
+from variant_table import VariantTable
 
 
-def count_alt_alleles(df):
-    """Count number of alternative alleles per sample in gatk variant table."""
-    adcols = [x for x in df if '.AD' in x]
-    alt_allele_counts = [df[col].str.split(',', 1).str[0].astype(int)
-                         for col in adcols]
-    return alt_allele_counts
+def filter_variants(variants, cutoff):
+    """Remove shared variants from a VariantTable
 
+    Returns
+    -------
+    List[DataFrame]
+        A DataFrame containing sites which passed filtering for each sample
 
-def get_unique_variants(df, max_other_counts, min_self_counts):
-    altcounts = count_alt_alleles(df)
-    nsamples_above_max = sum([count > max_other_counts for count in altcounts])
-    nsamples_above_min = sum([count > min_self_counts for count in altcounts])
-    site_is_unique = (nsamples_above_max == 1) & (nsamples_above_min == 1)
-    unique_variants = df[site_is_unique].reindex()
-    return unique_variants
+    """
+    counts = variants.allele_counts
+    freqs = variants.allele_freq
+    passing = [DataFrame() for _ in range(variants.nsamples)]
+    num_alt_alleles_per_site = len(list(counts[0]))
+    for allele_index in range(num_alt_alleles_per_site):
+        # Loop through alleles
+        nonzero_af = [freq[allele_index] > cutoff for freq in freqs]
+        zero_af = [count[allele_index] == 0 for count in counts]
+        for sample_index in range(variants.nsamples):
+            # Loop through samples
+            is_unique_hom = ((zero_af[sample_index]) &
+                             (sum(nonzero_af) == variants.nsamples - 1))
+            is_unique_het = ((sum(zero_af) == variants.nsamples - 1) &
+                             (nonzero_af[sample_index]))
+            is_unique_variant = is_unique_het | is_unique_hom
+            if sum(is_unique_variant):
+                passing[sample_index] = passing[sample_index].append(
+                    variants.df.loc[is_unique_variant.values],
+                    ignore_index=True)
+    return passing
 
 
 @click.command()
-@click.option('--max-other-counts', type=int,
-              help='Max number of reads supporting allele in other samples.')
-@click.option('--min-self-counts', type=int,
-              help=('Minimum number of reads supporting allele in mutant'
-                    'sample.'))
-@click.option('--output', type=str, help=('Output file'))
+@click.option('--het-cutoff', type=float,
+              help='Minimum allele frequency to be considered heterozygous')
+@click.option('--outdir', type=str, help=('Output directory'))
 @click.argument('filename', nargs=1)
-def filter_shared_alleles(max_other_counts, min_self_counts, output, filename):
-    df = pd.read_csv(filename, sep='\t')
-    unique_variants = get_unique_variants(df, max_other_counts, min_self_counts)
-    write_table(unique_variants, output, sep='\t')
+def filter_shared_alleles(het_cutoff, outdir, filename):
+    df = read_csv(filename, sep='\t')
+    variants = VariantTable(df)
+    unique_variants = filter_variants(variants, het_cutoff)
+    try:
+        os.mkdir(outdir)
+    except OSError:
+        pass
+    for sample, sample_data in zip(variants.samples, unique_variants):
+        outfile = os.path.join(outdir, sample + '.tsv')
+        write_table(sample_data, outfile, sep='\t')
 
 
 if __name__ == '__main__':
