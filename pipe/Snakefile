@@ -191,16 +191,11 @@ rule all:
                genotype=GENOTYPE, iter=PLOT_ITER),
         expand("output/produce_covplots{iter}/{sample}.covsum.png",
                sample=SAMPLE, iter=PLOT_ITER),
-        expand('output/plot_variant_quality_scores/{sample}.svg',
+        # expand('output/plot_variant_quality_scores/{sample}.svg',
+        #        sample=SAMPLE),
+        expand('output/filter_shared_variants/{sample}.tsv',
                sample=SAMPLE),
-        expand('output/calc_number_filtered_sites/{sample}.{type}.txt',
-               sample=SAMPLE, type=VARIANT_TYPES),
-        expand('output/select_unique_variants/{sample}.{type}.tsv',
-               sample=SAMPLE, type=VARIANT_TYPES),
-        expand('output/determine_callable_sites/{sample}.txt',
-                sample=SAMPLE),
-        expand('output/joint_genotype_gvcfs/{genotype}.vcf',
-                genotype=GENOTYPE)
+        expand('output/genotype_gvcfs/{sample}.vcf', sample=SAMPLE)
         # }}}
 
 # ==============================================================================
@@ -825,12 +820,13 @@ rule genotype_gvcfs:
         snp_heterozygosity = 0.015,
         indel_heterozygosity = 0.01
     shell:
-        'gatk GenotypeGVCFs '
+        'java -jar {config[gatk3_jar]} -T GenotypeGVCFs '
         '-R {input.assembly} '
         '-V {input.gvcf} '
-        '-O {output} '
+        '-o {output} '
+        '--includeNonVariantSites '
         '--heterozygosity {params.snp_heterozygosity} '
-        '--indel-heterozygosity {params.indel_heterozygosity} '
+        '--indel_heterozygosity {params.indel_heterozygosity} '
 
 rule combine_gvcfs:
     input:
@@ -861,7 +857,6 @@ rule sort_combined_gvcfs:
     shell:
         'picard SortVcf I={input} O={output}'
 
-
 rule joint_genotype_gvcfs:
     input:
         unpack(match_final_assembly),
@@ -878,8 +873,44 @@ rule joint_genotype_gvcfs:
         '-R {input.assembly} '
         '-V {input.gvcf} '
         '-o {output} '
+        '--includeNonVariantSites '
         '--heterozygosity {params.snp_heterozygosity} '
         '--indel_heterozygosity {params.indel_heterozygosity}'
+
+rule depth_filter_variants:
+    input:
+        'output/joint_genotype_gvcfs/{genotype}.tsv'
+    output:
+        tsv = 'output/depth_filter_variants/{genotype}.tsv',
+        summary = 'output/depth_filter_variants/{genotype}.txt'
+    params:
+        min = 20,
+        max = 100
+    shell:
+        'scripts/depth_filter_variants.py '
+        '--min-depth {params.min} '
+        '--max-depth {params.max} '
+        '--summary {output.summary} '
+        '--output {output.tsv}'
+
+rule filter_shared_variants:
+    input:
+        expand('output/depth_filter_variants/{genotype}.tsv',
+                genotype=GENOTYPE)
+    output:
+        expand('output/filter_shared_variants/{sample}.tsv',
+                sample=SAMPLE)
+    params:
+        cutoff = 0.2
+    resources:
+        mem_mb = 20000
+    run:
+        outdir = os.path.dirname(output[0])
+        for filename in input:
+            shell('scripts/filter_shared_alleles.py '
+                  '--het-cutoff {params.cutoff} '
+                  '--outdir ' + outdir + ' ' +
+                  filename)
 
 rule extract_variant_coverage:
     input:
@@ -909,28 +940,6 @@ rule select_variants:
               '-V {input.vcf} '
               '-O {output} ' +
               criteria)
-
-rule determine_callable_sites:
-    input:
-        unpack(match_final_assembly),
-        bam = 'output/align_to_assembly_final/{sample}.bam',
-        bai = 'output/align_to_assembly_final/{sample}.bam.bai',
-        repeats = lambda wildcards: (
-                os.path.join('output', 'repeatmasker',
-                             get_genotype(wildcards) + 'SC.bed'))
-    output:
-        bed = 'output/determine_callable_sites/{sample}.bed',
-        summary = 'output/determine_callable_sites/{sample}.txt'
-    shell:
-        'java -jar {config[gatk3_jar]} '
-        '--excludeIntervals {input.repeats} '
-        '-T CallableLoci '
-        '-R {input.assembly} '
-        '-I {input.bam} '
-        '-o {output.bed} '
-        '-summary {output.summary} '
-        '--minDepth {config[min_depth]} '
-        '--maxDepth {config[max_depth]}'
 
 rule exclude_nonvariants:
     input:
@@ -1016,21 +1025,6 @@ rule calc_number_filtered_sites:
         'echo "\nSites postfilter: " >> {output}; '
         'grep -vc "^#" {input.post} >> {output}'
 
-rule depth_filter_variants:
-    input:
-        unpack(match_final_assembly),
-        vcf = 'output/filter_variants/{sample}.{vartype}.vcf',
-    output:
-        vcf = 'output/depth_filter_variants/{sample}.{vartype}.vcf'
-    shell:
-        'gatk VariantFiltration '
-            '-R {input.assembly} '
-            '-V {input.vcf} '
-            '-O {output.vcf} '
-            '--filter-name depth_filter '
-            '--filter-expression '
-            '"DP < {config[min_depth]} || DP > {config[max_depth]}"'
-
 rule remove_filtered_variants:
     input:
         unpack(match_final_assembly),
@@ -1045,48 +1039,13 @@ rule remove_filtered_variants:
         '--exclude-filtered '
         '--exclude-non-variants'
 
-rule select_unique_variants:
-    input:
-        filtered = expand(
-            'output/remove_filtered_variants/{sample}.{{vartype}}.vcf',
-            sample=SAMPLE),
-        unfiltered = expand(
-            'output/exclude_nonvariants/{sample}.{{vartype}}.vcf',
-            sample=SAMPLE)
-    output:
-        expand('output/select_unique_variants/{sample}.{{vartype}}.tsv',
-                sample=SAMPLE)
-    run:
-        # Remove all sites in each filtered sample which are also present in any
-        # unfiltered sample of the same genotype.
-        output_prefix = os.path.dirname(output[0]) + '/'
-        for genotype in GENOTYPE:
-            genotype_samples = GENOTYPE_TO_SAMPLE[genotype]
-            filtered_files = []
-            for f in input.filtered:
-                if any(substr in f for substr in genotype_samples):
-                    filtered_files.append(f)
-
-            for target in filtered_files:
-                comparisons = []
-                for f in input.unfiltered:
-                    if (any(substr in f for substr in genotype_samples) and
-                            local.path(target).name != local.path(f).name):
-                        comparisons.append(f)
-
-                shell('complement.py '
-                      '-o ' + output_prefix + ' '
-                      '--tab_separated '
-                      '-i 0,1,9 '
-                      '--target ' + target + ' ' +
-                      ' '.join([target] + comparisons))
 
 rule vcf_to_tab:
     input:
         unpack(match_final_assembly),
-        vcf = 'output/{dir}/{sample}.{vartype}.vcf'
+        vcf = 'output/{dir}/{sample}.vcf'
     output:
-        'output/{dir}/{sample}.{vartype}.tsv'
+        'output/{dir}/{sample}.tsv'
     shell:
         'gatk VariantsToTable '
         '-R {input.assembly} '
