@@ -5,7 +5,9 @@ from tempfile import NamedTemporaryFile
 from uuid import uuid4
 
 from fmbiopy.fmlist import flatten
+from fmbiopy.io import read_header
 import numpy as np
+from pandas import read_csv
 from plumbum import (
     FG,
     local,
@@ -800,15 +802,15 @@ rule call_variants:
     log:
         'output/call_variants/log/{sample}.log'
     shell:
-        'gatk HaplotypeCaller '
+        'java -jar {config[gatk3_jar]} -T HaplotypeCaller '
         '-R {input.assembly} '
         '-I {input.bam} '
-        '--exclude-intervals {input.repeats} '
-        '--emit-ref-confidence GVCF '
-        '-O {output} '
+        '--excludeIntervals {input.repeats} '
+        '--emitRefConfidence GVCF '
+        '-o {output} '
         '--heterozygosity {params.snp_heterozygosity} '
-        '--output-mode EMIT_ALL_SITES '
-        '--indel-heterozygosity {params.indel_heterozygosity} '
+        '--output_mode EMIT_ALL_SITES '
+        '--indel_heterozygosity {params.indel_heterozygosity} '
 
 rule genotype_gvcfs:
     input:
@@ -867,7 +869,7 @@ rule joint_genotype_gvcfs:
         snp_heterozygosity = 0.015,
         indel_heterozygosity = 0.01
     resources:
-        mem_mb = 20000
+        mem_mb = 30000
     shell:
         'java -jar {config[gatk3_jar]} -T GenotypeGVCFs '
         '-R {input.assembly} '
@@ -891,7 +893,7 @@ rule depth_filter_variants:
         '--min-depth {params.min} '
         '--max-depth {params.max} '
         '--summary {output.summary} '
-        '--output {output.tsv}'
+        '--output {output.tsv} {input}'
 
 rule filter_shared_variants:
     input:
@@ -911,6 +913,22 @@ rule filter_shared_variants:
                   '--het-cutoff {params.cutoff} '
                   '--outdir ' + outdir + ' ' +
                   filename)
+
+rule filter_per_sample_variants:
+    input:
+        tsv = 'output/filter_shared_variants/{sample}.tsv',
+        vcf = 'output/genotype_gvcfs/{sample}.vcf'
+    output:
+        'output/filter_per_sample_variants/{sample}.vcf'
+    shell:
+        # Extract the vcf header
+        "grep '^#' {input.vcf} > {output};"
+
+        # Filter out all variant positions in input.vcf which are not in
+        # input.tsv
+        "cat {input.tsv} | "
+        "awk '{{printf \"%s\\t%s\\t\\n\", $1, $2}}' | "
+        "grep -f /dev/stdin {input.vcf} >> {output}"
 
 rule extract_variant_coverage:
     input:
@@ -1051,7 +1069,8 @@ rule vcf_to_tab:
         '-R {input.assembly} '
         '-V {input.vcf} '
         '-O {output} '
-        '-F CHROM -F POS -GF GT -F QUAL -F MQ -F DP -F TRANSTION -GF AD -F TYPE'
+        '-F CHROM -F POS -GF GT -F QUAL -F MQ -F DP -F TRANSTION -GF AD '
+        '-GF DP -F TYPE'
 
 
 # }}}
