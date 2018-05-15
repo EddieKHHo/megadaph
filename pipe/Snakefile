@@ -1,5 +1,4 @@
 """Megadaph Variant Calling Pipeline"""
-
 import os
 from tempfile import NamedTemporaryFile
 from uuid import uuid4
@@ -15,6 +14,8 @@ from plumbum import (
 from plumbum.cmd import (
     blobtools,
     busco,
+    calc_bed_length,
+    calc_fasta_length,
     cat,
 )
 import scipy.stats as st
@@ -895,6 +896,22 @@ rule depth_filter_variants:
         '--summary {output.summary} '
         '--output {output.tsv} {input}'
 
+rule count_callable_loci:
+    input:
+        match_final_assembly,
+        depth_filtered = 'output/depth_filter_variants/{genotype}.txt',
+        masked = 'output/repeatmasker/{genotype}.bed'
+    output:
+        'output/count_callable_loci/{genotype}.txt'
+    run:
+        num_masked = int(calc_bed_length(input.masked).rstrip())
+        with open(input.depth_filtered, 'r') as inp:
+            num_depth_filtered = int(inp.read().rstrip())
+        assembly_length = int(calc_fasta_length(input.assembly).rstrip())
+        num_callable = assembly_length - num_depth_filtered - num_masked
+        with open(output, 'w') as out:
+            out.write(str(num_callable))
+
 rule filter_shared_variants:
     input:
         expand('output/depth_filter_variants/{genotype}.tsv',
@@ -932,7 +949,7 @@ rule filter_per_sample_variants:
 
 rule extract_variant_coverage:
     input:
-        'output/genotype_gvcfs/{sample}.vcf'
+        'output/filter_per_sample_variants/{sample}.vcf'
     output:
         'output/extract_variant_coverage{iter}/{sample}.txt',
     shell:
@@ -941,7 +958,7 @@ rule extract_variant_coverage:
 rule select_variants:
     input:
         unpack(match_final_assembly),
-        vcf = 'output/genotype_gvcfs/{sample}.vcf',
+        vcf = 'output/filter_per_sample_variants/{sample}.vcf',
     output:
         'output/select_variants/{sample}.{vartype}.vcf'
     run:
@@ -996,7 +1013,6 @@ rule plot_variant_quality_scores:
         'output/plot_variant_quality_scores/{sample}.svg'
     script:
         'scripts/plot_variant_quality_scores.R'
-
 
 rule filter_variants:
     input:
@@ -1057,7 +1073,6 @@ rule remove_filtered_variants:
         '--exclude-filtered '
         '--exclude-non-variants'
 
-
 rule vcf_to_tab:
     input:
         unpack(match_final_assembly),
@@ -1071,6 +1086,14 @@ rule vcf_to_tab:
         '-O {output} '
         '-F CHROM -F POS -GF GT -F QUAL -F MQ -F DP -F TRANSTION -GF AD '
         '-GF DP -F TYPE'
+
+#
+# rule calc_mutation_rate:
+#     input:
+#         'output/remove_filtered_variants/{{sample}}.{vartype}.vcf'
+#     output:
+#         'output/calc_mutation_rate/{sample}.{vartype}.tsv
+#     shell:
 
 
 # }}}
