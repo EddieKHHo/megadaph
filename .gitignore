@@ -17,6 +17,7 @@ exploratory_analyses
 /data/
 devpipe
 pipe/input
+!pipe/input/metadata/line_info.csv
 pipe/output
 pipe/util
 pipe/ref
