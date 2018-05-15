@@ -15,5 +15,4 @@ augustus_scripts: /mnt/lfs2/schaack/.linuxbrew/Cellar/augustus/3.3_2/scripts
 mitochondrial_reference: input/ref/magna.mt.europe.fa
 nuclear_reference: input/ref/magna.nuc.fa
 repeat_library: input/repeat_library/UC-families.fa
-min_depth: 10
-max_depth: 100
+line_info: input/metadata/line_info.csv
