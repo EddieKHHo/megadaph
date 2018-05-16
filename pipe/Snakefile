@@ -1,6 +1,5 @@
-"""Megadaph Variant Calling Pipeline"""
+"""Megadaph SNP and small indel variant calling pipeline."""
 import os
-from tempfile import NamedTemporaryFile
 from uuid import uuid4
 
 from fmbiopy.fmlist import flatten
@@ -23,7 +22,6 @@ import scipy.stats as st
 # ==============================================================================
 # Set up
 # ==============================================================================
-# {{{{
 configfile: "config.yml"
 
 SAMPLE, PAIR = glob_wildcards(
@@ -46,8 +44,12 @@ for genotype in GENOTYPE:
 # 3. Contamination filtering
 # Outputs from contamination were reassembled. This was continued until minimal
 # contamination was evident in blobplots
+
+# Assembly/Decontam iterations which should be plotted
 PLOT_ITER = ['1', '2', '_final']
+# Assembly iterations which should be targeted for decontamination
 DECONTAM_ITER = ['1', '2', '_reduced']
+# Iterations of De Novo assembly with spades
 ASSEMBLY_ITER = ['1', '2', '3']
 
 VARIANT_TYPES = ['snps', 'indels', 'other']
@@ -60,12 +62,10 @@ FASTA_INDICES = {
     'samtools': ['.fasta.fai']
 }
 INDEX_SUFFIXES = flatten(FASTA_INDICES.values())
-# }}}}
 
 # ==============================================================================
 # Helper functions
 # ==============================================================================
-# {{{
 
 def match_reads(wildcards):
     """Match reads to the current wildcards."""
@@ -153,6 +153,7 @@ def match_assembly(wildcards):
 
 
 def match_final_assembly(wildcards):
+    """Get the final assembly from the wildcards."""
     starting_control = get_starting_control(wildcards)
     outdict = {}
     prefix = os.path.join('output', 'filter_zero_coverage', starting_control)
@@ -180,12 +181,9 @@ def clear_directory(dir):
     dir.delete()
     dir.mkdir()
 
-# }}}
-
 # ==============================================================================
-# Targets
+# Pipeline Outputs
 # ==============================================================================
-# {{{
 rule all:
     input:
         'output/multiqc/multiqc.html',
@@ -194,17 +192,19 @@ rule all:
                genotype=GENOTYPE, iter=PLOT_ITER),
         expand("output/produce_covplots{iter}/{sample}.covsum.png",
                sample=SAMPLE, iter=PLOT_ITER),
-        # expand('output/plot_variant_quality_scores/{sample}.svg',
-        #        sample=SAMPLE),
+        'output/count_callable_loci/line_info.csv',
+        expand('output/plot_variant_quality_metrics/{sample}.svg',
+               sample=SAMPLE),
         expand('output/filter_shared_variants/{sample}.tsv',
                sample=SAMPLE),
-        expand('output/genotype_gvcfs/{sample}.vcf', sample=SAMPLE)
-        # }}}
+        expand('output/genotype_gvcfs/{sample}.vcf', sample=SAMPLE),
+        expand('output/remove_filtered_variants/{sample}.{vartype}.vcf',
+                sample=SAMPLE, vartype=VARIANT_TYPES)
 
 # ==============================================================================
 # Utility Rules
 # ==============================================================================
-# {{{
+
 rule index_bam:
     input:
         'output/{dir}/{group}.bam'
@@ -212,7 +212,6 @@ rule index_bam:
         'output/{dir}/{group}.bam.bai'
     shell:
         'samtools index {input}'
-
 
 rule index_fasta:
     input:
@@ -250,12 +249,10 @@ rule align_to_assembly:
               'samtools view -bh - | '
               'samtools sort - > {output.bam} 2> {log}')
 
-# }}}
-
 # ==============================================================================
 # Build extra input files
 # ==============================================================================
-# {{{
+
 rule build_diamond_database:
     output:
         "output/build_diamond_database/uniprot_ref_proteomes.fasta",
@@ -264,12 +261,10 @@ rule build_diamond_database:
     threads: 16
     script:
         "scripts/build_diamond_database.py"
-# }}}
 
 # ==============================================================================
 # Quality Control / Trimming
 # ==============================================================================
-# {{{
 
 rule trim_adapters:
     input:
@@ -355,12 +350,10 @@ rule quality_trim:
               'trimq={params.trimq} '
               'minlen={params.minlen} '
               'threads={threads} 2> {log.unpaired}')
-# }}}
 
 # ==============================================================================
-# Assembly-Decontamination Iterations
+# Assembly-Decontamination Iteration
 # ==============================================================================
-# {{{
 
 rule assembly:
     input:
@@ -444,6 +437,7 @@ rule diamond_blast_assembly:
         '--outfmt 6 '
         '--out {output}'
 
+# Add taxonomic information to diamond blast results
 rule taxify_diamond_blasts:
     input:
         diamond_hits = 'output/diamond_blast_assembly{iter}/{genotype}SC.out',
@@ -456,7 +450,7 @@ rule taxify_diamond_blasts:
         'blobtools taxify -f {input.diamond_hits} -m {input.taxids} -s 0 -t 2 '
         '-o {params.output_prefix}'
 
-
+# Get coverage at each base in the alignment
 rule convert_alignment_to_cov:
     input:
         unpack(match_assembly),
@@ -568,7 +562,6 @@ rule produce_blobtable:
     shell:
         'blobtools view -r all -b -i {input.db} -o {params.outdir}'
 
-
 rule find_contam_contigs:
     input:
         'output/produce_blobtable{iter}/{genotype}.blobDB.bestsum.table.txt'
@@ -632,12 +625,9 @@ rule filter_contamination:
               "gzip - > " + str(tmp))
         tmp.move(output.unpaired)
 
-# }}}
-
 # ==============================================================================
 # Reduction/Scaffolding
 # ==============================================================================
-# {{{
 
 rule redundans:
     input:
@@ -753,12 +743,9 @@ rule repeatmasker2bed:
     shell:
         'rmsk2bed < {input} | cut -f 1-3 > {output}'
 
-# }}}
-
 # ==============================================================================
 # Variant Calling Pre-Processing
 # ==============================================================================
-# {{{
 
 rule mark_duplicates:
     input:
@@ -778,13 +765,10 @@ rule mark_duplicates:
         'REMOVE_DUPLICATES=True '
         'M={log}'
 
-
-# }}}
-
 # ==============================================================================
 # Variant Calling
 # ==============================================================================
-# {{{
+
 rule call_variants:
     input:
         unpack(match_final_assembly),
@@ -860,6 +844,7 @@ rule sort_combined_gvcfs:
     shell:
         'picard SortVcf I={input} O={output}'
 
+# Create multisample genotyped vcf files
 rule joint_genotype_gvcfs:
     input:
         unpack(match_final_assembly),
@@ -880,6 +865,7 @@ rule joint_genotype_gvcfs:
         '--heterozygosity {params.snp_heterozygosity} '
         '--indel_heterozygosity {params.indel_heterozygosity}'
 
+# Remove variants which have coverage outside of the target range.
 rule depth_filter_variants:
     input:
         'output/joint_genotype_gvcfs/{genotype}.tsv'
@@ -896,22 +882,34 @@ rule depth_filter_variants:
         '--summary {output.summary} '
         '--output {output.tsv} {input}'
 
+
+# Count the total number of callable sites for each sample and add the
+# information to the line info metadata.
 rule count_callable_loci:
     input:
-        match_final_assembly,
-        depth_filtered = 'output/depth_filter_variants/{genotype}.txt',
-        masked = 'output/repeatmasker/{genotype}.bed'
+        assembly = expand('output/filter_zero_coverage/{genotype}SC.fasta',
+                genotype=GENOTYPE),
+        depth_filtered = expand('output/depth_filter_variants/{genotype}.txt',
+                genotype=GENOTYPE),
+        masked = expand('output/repeatmasker/{genotype}SC.bed',
+                genotype=GENOTYPE)
     output:
-        'output/count_callable_loci/{genotype}.txt'
+        'output/count_callable_loci/line_info.csv'
     run:
-        num_masked = int(calc_bed_length(input.masked).rstrip())
-        with open(input.depth_filtered, 'r') as inp:
-            num_depth_filtered = int(inp.read().rstrip())
-        assembly_length = int(calc_fasta_length(input.assembly).rstrip())
-        num_callable = assembly_length - num_depth_filtered - num_masked
-        with open(output, 'w') as out:
-            out.write(str(num_callable))
+        line_info = read_csv(config['line_info'])
+        line_info['bases_surveyed'] = np.nan
+        input_sources = zip(tuple(input + [GENOTYPE]))
+        for assembly, masked, depth_filtered, genotype in input_sources:
+            num_masked = int(calc_bed_length(masked).rstrip())
+            with open(depth_filtered, 'r') as inp:
+                num_depth_filtered = int(inp.read().rstrip())
+            assembly_length = int(calc_fasta_length(assembly).rstrip())
+            num_callable = assembly_length - num_depth_filtered - num_masked
+            genotype_idx = [x.startswith(genotype) for x in line_info['sample']]
+            line_info.loc[genotype_idx, 'bases_surveyed'] = num_callable
 
+
+# Filter out variants which are present in multiple samples
 rule filter_shared_variants:
     input:
         expand('output/depth_filter_variants/{genotype}.tsv',
@@ -931,6 +929,8 @@ rule filter_shared_variants:
                   '--outdir ' + outdir + ' ' +
                   filename)
 
+# Filter variants in the per-sample .vcf files using the the merged, filtered
+# variant tables.
 rule filter_per_sample_variants:
     input:
         tsv = 'output/filter_shared_variants/{sample}.tsv',
@@ -989,12 +989,12 @@ rule exclude_nonvariants:
         '--exclude-non-variants '
         '-O {output.vcf}'
 
-rule extract_variant_quality_scores:
+rule extract_variant_quality_metrics:
     input:
         unpack(match_final_assembly),
         vcf = 'output/select_variants/{sample}.{vartype}.vcf'
     output:
-        'output/extract_variant_quality_scores/{sample}.{vartype}.q.tsv'
+        'output/extract_variant_quality_metrics/{sample}.{vartype}.q.tsv'
     shell:
         'gatk VariantsToTable '
         '-R {input.assembly} '
@@ -1003,17 +1003,18 @@ rule extract_variant_quality_scores:
         '-F ReadPosRankSum -F SOR '
         '-O {output}'
 
-rule plot_variant_quality_scores:
+rule plot_variant_quality_metrics:
     input:
         snps = (
-            'output/extract_variant_quality_scores/{sample}.snps.q.tsv'),
+            'output/extract_variant_quality_metrics/{sample}.snps.q.tsv'),
         indels = (
-            'output/extract_variant_quality_scores/{sample}.indels.q.tsv')
+            'output/extract_variant_quality_metrics/{sample}.indels.q.tsv')
     output:
-        'output/plot_variant_quality_scores/{sample}.svg'
+        'output/plot_variant_quality_metrics/{sample}.svg'
     script:
         'scripts/plot_variant_quality_scores.R'
 
+# Filter variants using GATK quality metrics
 rule filter_variants:
     input:
         unpack(match_final_assembly),
@@ -1062,7 +1063,7 @@ rule calc_number_filtered_sites:
 rule remove_filtered_variants:
     input:
         unpack(match_final_assembly),
-        vcf = 'output/depth_filter_variants/{sample}.{vartype}.vcf',
+        vcf = 'output/filter_variants/{sample}.{vartype}.vcf',
     output:
         'output/remove_filtered_variants/{sample}.{vartype}.vcf'
     shell:
@@ -1073,7 +1074,7 @@ rule remove_filtered_variants:
         '--exclude-filtered '
         '--exclude-non-variants'
 
-rule vcf_to_tab:
+rule vcf_to_tsv:
     input:
         unpack(match_final_assembly),
         vcf = 'output/{dir}/{sample}.vcf'
@@ -1096,12 +1097,9 @@ rule vcf_to_tab:
 #     shell:
 
 
-# }}}
-
 # ==============================================================================
 # Summarize Pipeline
 # ==============================================================================
-# {{{
 
 rule raw_fastqc:
     input:
@@ -1130,7 +1128,6 @@ rule clean_fastqc:
         'fastqc '
         '-o {params.outdir} '
         '{input.fwd_reads} {input.rev_reads} {input.unpaired_reads}'
-
 
 rule quast:
     input:
@@ -1216,4 +1213,3 @@ rule multiqc:
         'output/multiqc/multiqc.html'
     shell:
         'multiqc -f -d -n {output} {input}'
-# }}}
