@@ -5,6 +5,7 @@ table.
 import click
 from fmbiopy.io import write_table
 from pandas import read_csv
+from plumbum.cmd import wc
 
 from variant_table import VariantTable
 
@@ -17,6 +18,15 @@ def depth_filter(variants, min_depth, max_depth):
     return variants
 
 
+def count_num_variants(tsv):
+    return int(wc('-l', tsv).rstrip()) - 1
+
+
+def copy_header(sourcefile, sinkfile):
+    with open(sourcefile, 'r') as source, open(sinkfile, 'w') as sink:
+        sink.write(source.readline())
+
+
 @click.command()
 @click.option('--max-depth', type=int, help='Maximum read depth')
 @click.option('--min-depth', type=int, help='Minimum read depth')
@@ -25,12 +35,20 @@ def depth_filter(variants, min_depth, max_depth):
 @click.option('--output', type=str, help='Output tsv file')
 @click.argument('filename', nargs=1)
 def depth_filter_variants(max_depth, min_depth, summary, output, filename):
-    df = read_csv(filename, sep='\t')
-    variants = VariantTable(df)
-    num_variants_prefilter = len(variants)
-    depth_filter(variants, min_depth, max_depth)
-    num_filtered_variants = num_variants_prefilter - len(variants)
-    write_table(variants.df, output, sep='\t')
+    num_variants_prefilter = 0
+    num_filtered_variants = 0
+    copy_header(filename, output)
+    with open(output, 'a') as outfile:
+        for chunk in read_csv(filename, sep='\t', chunksize=100000):
+            variants = VariantTable(chunk)
+            num_variants_in_chunk_prefilter = len(variants)
+            num_variants_prefilter += num_variants_in_chunk_prefilter
+            depth_filter(variants, min_depth, max_depth)
+            num_variants_in_chunk_postfilter = len(variants)
+            num_filtered_variants += (
+                num_variants_in_chunk_prefilter -
+                num_variants_in_chunk_postfilter)
+            variants.df.to_csv(outfile, sep='\t', header=False)
     with open(summary, 'w') as f:
         f.write(str(num_filtered_variants) + '\n')
 
