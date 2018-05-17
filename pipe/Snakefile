@@ -868,13 +868,15 @@ rule joint_genotype_gvcfs:
 # Remove variants which have coverage outside of the target range.
 rule depth_filter_variants:
     input:
-        'output/joint_genotype_gvcfs/{genotype}.tsv'
+        'output/joint_genotype_gvcfs/{genotype}.small.tsv'
     output:
         tsv = 'output/depth_filter_variants/{genotype}.tsv',
         summary = 'output/depth_filter_variants/{genotype}.txt'
     params:
         min = 20,
         max = 100
+    resources:
+        mem_mb = 100000
     shell:
         'scripts/depth_filter_variants.py '
         '--min-depth {params.min} '
@@ -1073,6 +1075,19 @@ rule remove_filtered_variants:
         '-O {output} '
         '--exclude-filtered '
         '--exclude-non-variants'
+
+rule vcf_to_small_tsv:
+    input:
+        unpack(match_final_assembly),
+        vcf = 'output/{dir}/{sample}.vcf'
+    output:
+        'output/{dir}/{sample}.small.tsv'
+    shell:
+        'gatk VariantsToTable '
+        '-R {input.assembly} '
+        '-V {input.vcf} '
+        '-O {output} '
+        '-F CHROM -F POS -F DP -GF AD -GF DP'
 
 rule vcf_to_tsv:
     input:
