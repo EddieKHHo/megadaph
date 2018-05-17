@@ -80,7 +80,7 @@ def filter_shared_alleles(het_cutoff, outdir, filename):
     mkdir(outdir)
     write_headers(outdir, filename)
     for chunk in read_csv(filename, sep='\t', chunksize=100000):
-        variants = VariantTable(chunk)
+        variants = VariantTable(chunk.dropna())
         unique_variants = filter_variants(variants, het_cutoff)
         for sample, sample_data in zip(variants.samples, unique_variants):
             outfile = os.path.join(outdir, sample + '.tsv')
