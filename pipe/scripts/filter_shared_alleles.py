@@ -5,7 +5,7 @@ table.
 import os
 
 import click
-from fmbiopy.io import write_table
+from fmbiopy.io import copy_header
 from pandas import (
     DataFrame,
     read_csv,
@@ -60,14 +60,15 @@ def get_sample_names(tsv):
     return samples
 
 
-def delete_prev_outputs(outdir, input_tsv):
+def get_output_files(outdir, input_tsv):
     sample_names = get_sample_names(input_tsv)
-    for name in sample_names:
-        output_file = os.path.join(outdir, name)
-        try:
-            os.unlink(output_file)
-        except OSError:
-            pass
+    output_files = [os.path.join(outdir, name) for name in sample_names]
+    return output_files
+
+
+def write_headers(outdir, input_tsv):
+    for output_file in get_output_files:
+        copy_header(input_tsv, output_file)
 
 
 @click.command()
@@ -77,8 +78,7 @@ def delete_prev_outputs(outdir, input_tsv):
 @click.argument('filename', nargs=1)
 def filter_shared_alleles(het_cutoff, outdir, filename):
     mkdir(outdir)
-    delete_prev_outputs(outdir, filename)
-
+    write_headers(outdir, filename)
     for chunk in read_csv(filename, sep='\t', chunksize=100000):
         variants = VariantTable(chunk)
         unique_variants = filter_variants(variants, het_cutoff)

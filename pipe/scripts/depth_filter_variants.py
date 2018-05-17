@@ -3,7 +3,7 @@
 table.
 """
 import click
-from fmbiopy.io import write_table
+from fmbiopy.io import copy_header
 from pandas import read_csv
 from plumbum.cmd import wc
 
@@ -20,11 +20,6 @@ def depth_filter(variants, min_depth, max_depth):
 
 def count_num_variants(tsv):
     return int(wc('-l', tsv).rstrip()) - 1
-
-
-def copy_header(sourcefile, sinkfile):
-    with open(sourcefile, 'r') as source, open(sinkfile, 'w') as sink:
-        sink.write(source.readline())
 
 
 @click.command()
