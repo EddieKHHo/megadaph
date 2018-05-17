@@ -45,22 +45,47 @@ def filter_variants(variants, cutoff):
     return passing
 
 
+def mkdir(dir):
+    try:
+        os.mkdir(dir)
+    except OSError:
+        pass
+
+
+def get_sample_names(tsv):
+    with open(tsv, 'r') as f:
+        header = f.readline().rstrip().split()
+    ad_columns = [x for x in header if 'AD' in x]
+    samples = [x.split('.')[0] for x in ad_columns]
+    return samples
+
+
+def delete_prev_outputs(outdir, input_tsv):
+    sample_names = get_sample_names(input_tsv)
+    for name in sample_names:
+        output_file = os.path.join(outdir, name)
+        try:
+            os.unlink(output_file)
+        except OSError:
+            pass
+
+
 @click.command()
 @click.option('--het-cutoff', type=float,
               help='Minimum allele frequency to be considered heterozygous')
 @click.option('--outdir', type=str, help=('Output directory'))
 @click.argument('filename', nargs=1)
 def filter_shared_alleles(het_cutoff, outdir, filename):
-    df = read_csv(filename, sep='\t')
-    variants = VariantTable(df)
-    unique_variants = filter_variants(variants, het_cutoff)
-    try:
-        os.mkdir(outdir)
-    except OSError:
-        pass
-    for sample, sample_data in zip(variants.samples, unique_variants):
-        outfile = os.path.join(outdir, sample + '.tsv')
-        write_table(sample_data, outfile, sep='\t')
+    mkdir(outdir)
+    delete_prev_outputs(outdir, filename)
+
+    for chunk in read_csv(filename, sep='\t', chunksize=100000):
+        variants = VariantTable(chunk)
+        unique_variants = filter_variants(variants, het_cutoff)
+        for sample, sample_data in zip(variants.samples, unique_variants):
+            outfile = os.path.join(outdir, sample + '.tsv')
+            with open(outfile, 'a') as out:
+                sample_data.to_csv(out, sep='\t', index=False)
 
 
 if __name__ == '__main__':

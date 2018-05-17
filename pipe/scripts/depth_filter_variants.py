@@ -35,20 +35,17 @@ def copy_header(sourcefile, sinkfile):
 @click.option('--output', type=str, help='Output tsv file')
 @click.argument('filename', nargs=1)
 def depth_filter_variants(max_depth, min_depth, summary, output, filename):
-    num_variants_prefilter = 0
     num_filtered_variants = 0
     copy_header(filename, output)
     with open(output, 'a') as outfile:
         for chunk in read_csv(filename, sep='\t', chunksize=100000):
             variants = VariantTable(chunk)
-            num_variants_in_chunk_prefilter = len(variants)
-            num_variants_prefilter += num_variants_in_chunk_prefilter
+            num_variants_prefilter = len(variants)
             depth_filter(variants, min_depth, max_depth)
-            num_variants_in_chunk_postfilter = len(variants)
+            num_variants_postfilter = len(variants)
             num_filtered_variants += (
-                num_variants_in_chunk_prefilter -
-                num_variants_in_chunk_postfilter)
-            variants.df.to_csv(outfile, sep='\t', header=False)
+                num_variants_prefilter - num_variants_postfilter)
+            variants.df.to_csv(outfile, sep='\t', header=False, index=False)
     with open(summary, 'w') as f:
         f.write(str(num_filtered_variants) + '\n')
 
