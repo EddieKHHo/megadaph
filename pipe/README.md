@@ -1,6 +1,6 @@
 # Megadaph Pipeline Implementation Notes
 
-The main pipeline script `Snakefile` is implemented in [Snakemake]a self-documenting pipeline development language.
+The main pipeline script `Snakefile` is implemented in [Snakemake], a self-documenting pipeline development language.
 
 Many external binaries and scripts are required to run the pipeline, most of which are not included in the github repo. The following is an outline of the pipeline implementation for researchers who wish to replicate or expand on these analyses.
 
