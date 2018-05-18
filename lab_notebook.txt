@@ -847,3 +847,99 @@ April 11th-25th, 2018
   Apparently bowtie2 has a long standing bug when aligning to masked sequences,
   so I also decided to switch to Novoalign for the final alignment step. This
   will probably also increase alignment accuracy in non-repetitive sequences.
+
+================================================================================
+April 28-30th, 2018
+================================================================================
+- Did a large refactor of the pipeline which had become very messy/buggy. Found
+  a couple of small bugs which had been causing continous headaches.
+
+===============================================================================
+May 1st, 2018
+===============================================================================
+- The linuxbrew install on the server imploded for some unknown reason. The GCC
+  version just broke out of nowhere which caused constant random IO errors which
+  broke various pipeline steps. Had to do a clean reinstall of linuxbrew and all
+  installed packages. Its a lot more organized now but I still can't seem to get
+  Perl modules to be detected properly when installing some programs. Also
+  installed conda so that it doesn't conflict with linuxbrew (mostly). Between
+  the two we should be able to install most programs.
+- Added step to pipeline for counting number of callable loci using GATK.
+
+===============================================================================
+May 2nd-3rd, 2018
+===============================================================================
+- Realized that its much more sensible to simply not call variants in repetitive
+  regions rather than masking repetive regions in the assembly directly. Rewrote
+  and reran the variant calling steps.
+
+===============================================================================
+May 3rd-8th, 2018
+===============================================================================
+- Added some extra variant plotting functionality and spent a lot of time
+  manually sifting through the initial variant sets to determine any potential
+  errors or biases.
+- Clearly we need to add more stringent filtering for removing variants which
+  are shared across samples.
+
+
+===============================================================================
+May 10th, 2018
+===============================================================================
+- Added a script for filtering out variants which show evidence for being
+  variants across multiple samples.
+
+===============================================================================
+May 13th, 2018
+===============================================================================
+- A lot of variants are slipping through the uniqueness filter due to being low
+  depth in one or more samples. I implemented a script which filters out any
+  sites which is not within an ideal read depth range across all samples.
+
+===============================================================================
+may 15th, 2018
+===============================================================================
+- GATK4 is still missing a lot of functionality particularly for doing pileup
+  analysis. I decided to revert all GATK analyses to GATK3.
+- Switched from using GATK to a custom script for counting number of callable
+  loci since I'm using a custom read depth filter.
+
+===============================================================================
+may 16th-17th, 2018
+===============================================================================
+- A bunch of memory errors occuring during the depth + unique filtering steps.
+  Clearly the input files are too large for reading in all at once. I rewrote
+  the scripts to read in chunks instead.
+- The latest results look very good for the majority of samples with most having
+  ~10-100 variants. However for several samples we see extremely inflated
+  mutation counts. The mutations in these samples seem to stem mostly from a few
+  scaffolds. I did a quick spotcheck of a couple in IGV and the mutations looked
+  fairly sensible. I'll look further into this tomorrow.
+
+===============================================================================
+may 18th, 2018
+===============================================================================
+Started my analysis by doing some datavis in R using the suspicious samples
+(SUS).
+- The affected scaffolds seem to broadly distributed in the SUS samples. In
+  IAEC1 and IAEC2 which were both highly inflated, we see a strong but imperfect
+  correlation between the scaffolds which were affected.
+- In many cases it seems that gatk is calling homozygous mutations when there is
+  clear evidence for heterozygosity in the alignments. The allele counts output
+  by GATK seems to be quite innacurate.
+
+  Examples in IA genotype:
+  - scaffold00007:11527,11613, 10379
+
+- Cases of normal looking mutations:
+  - scaffold00007:10460
+
+- In other cases we see regions with a series of apparent loss of
+  heterozygosity mutations in one sample. This could potentially be due to
+  overcleaning during decontamination. To test this I'll realign all of the raw
+  read sets to the final assemblies to see if the heterozygous sites are
+  restored.
+
+- There appears to be no correlation across samples between number of mutations
+  and generation number, strongly suggesting that most detected mutations are
+  false positives even in the less extreme samples.
