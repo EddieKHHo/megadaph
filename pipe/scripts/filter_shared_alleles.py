@@ -62,12 +62,13 @@ def get_sample_names(tsv):
 
 def get_output_files(outdir, input_tsv):
     sample_names = get_sample_names(input_tsv)
-    output_files = [os.path.join(outdir, name) for name in sample_names]
+    output_files = [os.path.join(outdir, name + '.tsv')
+                    for name in sample_names]
     return output_files
 
 
 def write_headers(outdir, input_tsv):
-    for output_file in get_output_files:
+    for output_file in get_output_files(outdir, input_tsv):
         copy_header(input_tsv, output_file)
 
 
@@ -80,7 +81,7 @@ def filter_shared_alleles(het_cutoff, outdir, filename):
     mkdir(outdir)
     write_headers(outdir, filename)
     for chunk in read_csv(filename, sep='\t', chunksize=100000):
-        variants = VariantTable(chunk)
+        variants = VariantTable(chunk.dropna())
         unique_variants = filter_variants(variants, het_cutoff)
         for sample, sample_data in zip(variants.samples, unique_variants):
             outfile = os.path.join(outdir, sample + '.tsv')
