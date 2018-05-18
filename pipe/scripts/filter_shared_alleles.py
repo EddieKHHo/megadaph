@@ -68,6 +68,7 @@ def get_output_files(outdir, input_tsv):
 
 
 def write_headers(outdir, input_tsv):
+    """Copy tsv header to output files."""
     for output_file in get_output_files(outdir, input_tsv):
         copy_header(input_tsv, output_file)
 
