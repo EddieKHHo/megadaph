@@ -69,21 +69,17 @@ INDEX_SUFFIXES = flatten(FASTA_INDICES.values())
 
 def match_reads(wildcards):
     """Match reads to the current wildcards."""
-    try:
-        smp = wildcards.sample
-    except AttributeError:
-        smp = wildcards.genotype + 'SC'
+    smp = get_sample(wildcards)
     outdict = {}
-    read_dir = 'output'
     if wildcards.iter in ['_final', '_ref']:
-        read_dir = os.path.join(read_dir, 'filter_contamination_reduced')
+        read_dir = 'output/filter_contamination_reduced'
     elif wildcards.iter == '_reduced':
-        read_dir = os.path.join(read_dir, 'filter_contamination2')
-    elif int(wildcards.iter) == 1:
-        read_dir = os.path.join(read_dir, 'quality_trim')
+        read_dir = 'output/filter_contamination2'
+    elif wildcards.iter in ['1', '_raw_to_final']:
+        read_dir = 'output/quality_trim'
     else:
         prev_iter = str(int(wildcards.iter) - 1)
-        read_dir = os.path.join(read_dir, 'filter_contamination' + prev_iter)
+        read_dir = 'output/filter_contamination' + prev_iter
     outdict['fwd_reads'] = os.path.join(read_dir, smp + '.R1.fastq.gz')
     outdict['rev_reads'] = os.path.join(read_dir, smp + '.R2.fastq.gz')
     outdict['unpaired_reads'] = os.path.join(
@@ -131,26 +127,32 @@ def get_starting_control(wildcards):
 def match_assembly(wildcards):
     """Match the current assembly and indices to the wildcards."""
     outdict = dict()
-    if hasattr(wildcards, 'iter'):
-        if wildcards.iter == '_ref':
-            outdict['assembly'] = config['nuclear_reference']
-            prefix = os.path.splitext(outdict['assembly'])[0]
-            dir = os.path.dirname(outdict['assembly'])
-            outdict['indices'] = [
-                os.path.join(dir, (prefix + suffix))
-                for suffix in INDEX_SUFFIXES]
-            return outdict
-
-    starting_control = get_starting_control(wildcards)
-    if wildcards.iter == '_final':
-        dir = os.path.join('output', 'filter_zero_coverage')
+    if wildcards.iter == '_ref':
+        outdict = get_nuclear_reference()
+    elif wildcards.iter == '_raw_to_final':
+        outdict = match_final_assembly(wildcards)
     else:
-        dir = os.path.join('output', 'length_filter_assembly' + wildcards.iter)
-    outdict['assembly'] = os.path.join(dir, (starting_control + '.fasta'))
-    outdict['indices'] = [os.path.join(dir, starting_control + suffix)
-            for suffix in INDEX_SUFFIXES]
+        starting_control = get_starting_control(wildcards)
+        if wildcards.iter == '_final':
+            dir = os.path.join('output', 'filter_zero_coverage')
+        else:
+            dir = os.path.join('output',
+                               'length_filter_assembly' + wildcards.iter)
+        outdict['assembly'] = os.path.join(dir, (starting_control + '.fasta'))
+        outdict['indices'] = [os.path.join(dir, starting_control + suffix)
+                              for suffix in INDEX_SUFFIXES]
     return outdict
 
+def get_nuclear_reference():
+    """Get the published nuclear reference sequence and indices."""
+    outdict = dict()
+    outdict['assembly'] = config['nuclear_reference']
+    prefix = os.path.splitext(outdict['assembly'])[0]
+    dir = os.path.dirname(outdict['assembly'])
+    outdict['indices'] = [
+        os.path.join(dir, (prefix + suffix))
+        for suffix in INDEX_SUFFIXES]
+    return outdict
 
 def match_final_assembly(wildcards):
     """Get the final assembly from the wildcards."""
@@ -198,8 +200,14 @@ rule all:
         expand('output/filter_shared_variants/{sample}.tsv',
                sample=SAMPLE),
         expand('output/genotype_gvcfs/{sample}.vcf', sample=SAMPLE),
-        expand('output/remove_filtered_variants/{sample}.{vartype}.vcf',
-                sample=SAMPLE, vartype=VARIANT_TYPES)
+        expand('output/remove_filtered_variants/{sample}.{vartype}.big.tsv',
+                sample=SAMPLE, vartype=VARIANT_TYPES),
+        expand('output/align_to_assembly_raw_to_final/{sample}.bam',
+                sample=SAMPLE),
+        expand('output/align_to_assembly_raw_to_final/{sample}.bam.bai',
+                sample=SAMPLE),
+        expand('output/realign_IAEC1/IAEC1_to_{genotype}SC.bam',
+                genotype=GENOTYPE)
 
 # ==============================================================================
 # Utility Rules
@@ -896,11 +904,15 @@ rule count_callable_loci:
         masked = expand('output/repeatmasker/{genotype}SC.bed',
                 genotype=GENOTYPE)
     output:
-        'output/count_callable_loci/line_info.csv'
+        line_info = 'output/count_callable_loci/line_info.csv'
     run:
         line_info = read_csv(config['line_info'])
         line_info['bases_surveyed'] = np.nan
-        input_sources = zip(tuple(input + [GENOTYPE]))
+        input_sources = zip(
+                input.assembly,
+                input.masked,
+                input.depth_filtered,
+                GENOTYPE)
         for assembly, masked, depth_filtered, genotype in input_sources:
             num_masked = int(calc_bed_length(masked).rstrip())
             with open(depth_filtered, 'r') as inp:
@@ -909,6 +921,7 @@ rule count_callable_loci:
             num_callable = assembly_length - num_depth_filtered - num_masked
             genotype_idx = [x.startswith(genotype) for x in line_info['sample']]
             line_info.loc[genotype_idx, 'bases_surveyed'] = num_callable
+        line_info.to_csv(output.line_info, index=False)
 
 
 # Filter out variants which are present in multiple samples
@@ -921,15 +934,14 @@ rule filter_shared_variants:
                 sample=SAMPLE)
     params:
         cutoff = 0.2
-    resources:
-        mem_mb = 20000
+    threads: 9
     run:
         outdir = os.path.dirname(output[0])
-        for filename in input:
-            shell('scripts/filter_shared_alleles.py '
-                  '--het-cutoff {params.cutoff} '
-                  '--outdir ' + outdir + ' ' +
-                  filename)
+        shell('parallel -j {threads} '
+              '"scripts/filter_shared_alleles.py '
+              '--het-cutoff {params.cutoff} '
+              '--outdir ' + outdir + '" ' +
+              '::: {input}')
 
 # Filter variants in the per-sample .vcf files using the the merged, filtered
 # variant tables.
@@ -939,6 +951,8 @@ rule filter_per_sample_variants:
         vcf = 'output/genotype_gvcfs/{sample}.vcf'
     output:
         'output/filter_per_sample_variants/{sample}.vcf'
+    resources:
+        mem_mb = 20000
     shell:
         # Extract the vcf header
         "grep '^#' {input.vcf} > {output};"
@@ -965,17 +979,17 @@ rule select_variants:
         'output/select_variants/{sample}.{vartype}.vcf'
     run:
         if wildcards.vartype == 'snps':
-            criteria = '--select-type-to-include SNP'
+            criteria = '--selectTypeToInclude SNP'
         elif wildcards.vartype == 'indels':
-            criteria = '--select-type-to-include INDEL'
+            criteria = '--selectTypeToInclude INDEL'
         elif wildcards.vartype == 'other':
             criteria = (
-                '--select-type-to-exclude SNP '
-                '--select-type-to-exclude INDEL')
-        shell('gatk SelectVariants '
+                '--selectTypeToExclude SNP '
+                '--selectTypeToExclude INDEL')
+        shell('java -jar {config[gatk3_jar]} -T SelectVariants '
               '-R {input.assembly} '
               '-V {input.vcf} '
-              '-O {output} ' +
+              '-o {output} ' +
               criteria)
 
 rule exclude_nonvariants:
@@ -985,11 +999,11 @@ rule exclude_nonvariants:
     output:
         vcf = 'output/exclude_nonvariants/{sample}.{vartype}.vcf'
     shell:
-        'gatk SelectVariants '
+        'java -jar {config[gatk3_jar]} SelectVariants '
         '-R {input.assembly} '
         '-V {input.vcf} '
-        '--exclude-non-variants '
-        '-O {output.vcf}'
+        '--excludeNonVariants '
+        '-o {output.vcf}'
 
 rule extract_variant_quality_metrics:
     input:
@@ -998,12 +1012,12 @@ rule extract_variant_quality_metrics:
     output:
         'output/extract_variant_quality_metrics/{sample}.{vartype}.q.tsv'
     shell:
-        'gatk VariantsToTable '
+        'java -jar {config[gatk3_jar]} -T VariantsToTable '
         '-R {input.assembly} '
         '-V {input.vcf} '
         '-F CHROM -F QUAL -F QD -F DP -F MQ -F MQRankSum -F FS -GF AD '
         '-F ReadPosRankSum -F SOR '
-        '-O {output}'
+        '-o {output}'
 
 rule plot_variant_quality_metrics:
     input:
@@ -1043,12 +1057,12 @@ rule filter_variants:
                 'ReadPosRankSum': ['< -10.0', '> 10.0']
             }
         filter_expression = build_filter_expression(filters)
-        shell('gatk VariantFiltration '
+        shell('java -jar {config[gatk3_jar]} -T VariantFiltration '
               '-R {input.assembly} '
               '-V {input.vcf} '
-              '-O {output} '
-              '--filter-name {wildcards.vartype}_filter '
-              '--filter-expression ' + filter_expression)
+              '-o {output} '
+              '--filterName {wildcards.vartype}_filter '
+              '--filterExpression ' + filter_expression)
 
 rule calc_number_filtered_sites:
     input:
@@ -1069,12 +1083,12 @@ rule remove_filtered_variants:
     output:
         'output/remove_filtered_variants/{sample}.{vartype}.vcf'
     shell:
-        'gatk SelectVariants '
+        'java -jar {config[gatk3_jar]} -T SelectVariants '
         '-R {input.assembly} '
         '-V {input.vcf} '
-        '-O {output} '
-        '--exclude-filtered '
-        '--exclude-non-variants'
+        '-o {output} '
+        '--excludeFiltered '
+        '--excludeNonVariants'
 
 rule vcf_to_small_tsv:
     input:
@@ -1083,7 +1097,7 @@ rule vcf_to_small_tsv:
     output:
         'output/{dir}/{sample}.small.tsv'
     shell:
-        'gatk VariantsToTable '
+        'java -jar {config[gatk3_jar]} -T VariantsToTable '
         '-R {input.assembly} '
         '-V {input.vcf} '
         '-O {output} '
@@ -1094,16 +1108,16 @@ rule vcf_to_tsv:
         unpack(match_final_assembly),
         vcf = 'output/{dir}/{sample}.vcf'
     output:
-        'output/{dir}/{sample}.tsv'
+        'output/{dir}/{sample}.big.tsv'
     shell:
-        'gatk VariantsToTable '
+        'java -jar {config[gatk3_jar]} -T VariantsToTable '
         '-R {input.assembly} '
         '-V {input.vcf} '
-        '-O {output} '
-        '-F CHROM -F POS -GF GT -F QUAL -F MQ -F DP -F TRANSTION -GF AD '
+        '-o {output} '
+        '-F CHROM -F POS -GF GT -F QUAL -F MQ -F DP -F TRANSITION -GF AD '
         '-GF DP -F TYPE'
 
-#
+
 # rule calc_mutation_rate:
 #     input:
 #         'output/remove_filtered_variants/{{sample}}.{vartype}.vcf'
@@ -1111,7 +1125,42 @@ rule vcf_to_tsv:
 #         'output/calc_mutation_rate/{sample}.{vartype}.tsv
 #     shell:
 
+# Correlation with age
 
+
+
+# ==============================================================================
+# Variant Validation
+# ==============================================================================
+
+rule realign_IAEC1:
+    input:
+        fwd_reads = 'output/filter_contamination_reduced/IAEC1.R1.fastq.gz',
+        rev_reads = 'output/filter_contamination_reduced/IAEC1.R2.fastq.gz',
+        unpaired_reads = (
+            'output/filter_contamination_reduced/IAEC1.unpaired.fastq.gz'),
+        assembly = 'output/filter_zero_coverage/{genotype}SC.fasta',
+        indices = ['output/filter_zero_coverage/{genotype}SC' + suffix
+                   for suffix in INDEX_SUFFIXES]
+    output:
+        'output/realign_IAEC1/IAEC1_to_{genotype}SC.bam'
+    threads: 12
+    resources:
+        mem_mb = 20000
+    params:
+        max_insert = 1000
+    run:
+        index_prefix = os.path.splitext(input.assembly)[0]
+        shell('bowtie2 -1 {input.fwd_reads} -2 {input.rev_reads} '
+              '-U {input.unpaired_reads} -X {params.max_insert} '
+              '-x ' + index_prefix + ' --rg-id=IAEC1 '
+              '--rg=LIB:IAEC1 --rg=PL:illumina '
+              '--rg=SM:IAEC1 -p {threads} | '
+              'samtools view -bh - | '
+              'samtools sort - > {output}')
+
+
+#
 # ==============================================================================
 # Summarize Pipeline
 # ==============================================================================
