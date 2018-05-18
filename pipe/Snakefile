@@ -918,7 +918,7 @@ rule produce_pileup:
         'bam-readcount '
         '-f {input.assembly} '
         '--max-warnings 1 '
-        '{input.bam}
+        '{input.bam}'
 
 # Remove variants which have coverage outside of the target range.
 rule depth_filter_variants:
