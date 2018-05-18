@@ -773,6 +773,39 @@ rule mark_duplicates:
         'REMOVE_DUPLICATES=True '
         'M={log}'
 
+rule local_realignment:
+    input:
+        unpack(match_final_assembly),
+        bam = "output/mark_duplicates/{sample}.bam"
+    output:
+        bam = "output/local_realignment/{sample}.bam",
+        intervals = "output/local_realignment/{sample}.intervals"
+    params:
+        max_move = '500',
+        max_cons_reads = '300',
+        max_realignment_reads = '1000000',
+        max_cons = '100'
+    resources:
+        mem_mb = 20000
+    log:
+        "output/local_realignment/log/{sample}.log"
+    run:
+        shell('java -jar {config[gatk3_jar]} -T RealignerTargetCreator '
+              '-R {input.ref '
+              '-I {input.bam} '
+              '-o {output.intervals}')
+
+        shell('java -jar {config[gatk3_jar]} -T IndelRealigner '
+              '-R {input.ref} '
+              '-I {input.bam} '
+              '-o {output.bam} '
+              '--targetIntervals {output.intervals} '
+              '--maxReadsForRealignment {params.max_realignment_reads} '
+              '--maxPositionalMoveAllowed {params.max_move} '
+              '--maxReadsForConsensuses {params.max_cons_reads} '
+              '--log_to_file {log} '
+              '--maxConsensuses {params.max_cons}')
+
 # ==============================================================================
 # Variant Calling
 # ==============================================================================
@@ -780,8 +813,8 @@ rule mark_duplicates:
 rule call_variants:
     input:
         unpack(match_final_assembly),
-        bam = 'output/mark_duplicates/{sample}.bam',
-        bai = 'output/mark_duplicates/{sample}.bam.bai',
+        bam = 'output/local_realignment/{sample}.bam',
+        bai = 'output/local_realignment/{sample}.bam.bai',
         repeats = lambda wildcards: (
                 os.path.join('output', 'repeatmasker',
                              get_genotype(wildcards) + 'SC.bed'))
@@ -1213,7 +1246,7 @@ rule quast:
 
 rule qualimap:
     input:
-        'output/mark_duplicates/{sample}.bam'
+        'output/local_realignment/{sample}.bam'
     output:
         'output/qualimap/{sample}/genome_results.txt'
     threads: 8
