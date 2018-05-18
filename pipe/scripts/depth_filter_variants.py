@@ -11,7 +11,8 @@ from variant_table import VariantTable
 
 
 def depth_filter(variants, min_depth, max_depth):
-    in_range = [(depth > min_depth - 1) & (depth < max_depth + 1)
+    """Remove variants with coverage above `max_depth` or below `min_depth`"""
+    in_range = [(depth >= min_depth) & (depth <= max_depth)
                 for depth in variants.coverage]
     all_samples_in_range = sum(in_range) == variants.nsamples
     variants.df = variants.df.loc[all_samples_in_range].reindex()
@@ -19,6 +20,7 @@ def depth_filter(variants, min_depth, max_depth):
 
 
 def count_num_variants(tsv):
+    """Count number of variants in a tsv file."""
     return int(wc('-l', tsv).rstrip()) - 1
 
 
