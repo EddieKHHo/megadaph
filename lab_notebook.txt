@@ -943,3 +943,35 @@ Started my analysis by doing some datavis in R using the suspicious samples
 - There appears to be no correlation across samples between number of mutations
   and generation number, strongly suggesting that most detected mutations are
   false positives even in the less extreme samples.
+
+===============================================================================
+may 21st, 2018
+===============================================================================
+Examined the alignment of the raw IAEC1 reads to the final assembly to check for
+evidence of overcleaning.
+- Raw IAEC1 reads showed almost identical alignments in all positions I
+  examined.
+- Overcleaning does not seem to explain the suspicious variant patterns.
+
+Examined alignments of IAEC1 to assemblies from other genotypes:
+- IAEC1 showed a large number of mismatches/zero coverage regions in these
+  alignments as compared to the alignments to IASC
+
+The alignments of IAEC1 to other I isolates was less clearcut. I'll need to see
+similar alignments from a normal sample to determine the level of difference I
+should expect. I scheduled alignments of IB2 to all other isolates and will
+examine the results tomorrow.
+
+Also worked on producing a new script for filtering shared alleles. I will need
+to instead parse bam-readcount pileups and will be a bit trickier than before.
+
+===============================================================================
+may 22nd, 2018
+===============================================================================
+Examined the mitochondrial alignments of IAEC1/IAEC2 vs IB and IC samples.
+- Found marker polymorphisms in IB and IC which are not present in the IA
+  samples. This strongly suggests that the IAEC samples were not mislabelled.
+
+Realized the probable cause of the extra variants! My unique variant filtering
+step does not distinguish between gene conversion and de novo mutations. I've
+spent too long studying mitochondria for my own good!
