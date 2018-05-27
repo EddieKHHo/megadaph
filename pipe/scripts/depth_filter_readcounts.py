@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """Filter variants for which the mean coverage across samples isn't within a
 range.
 """
