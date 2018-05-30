@@ -208,6 +208,8 @@ rule all:
                 sample=SAMPLE),
         expand('output/realign_IAEC1/IAEC1_to_{genotype}SC.bam',
                 genotype=GENOTYPE),
+        expand('output/realign_IB2/IB2_to_{genotype}SC.bam',
+                genotype=GENOTYPE),
         expand('output/produce_pileup/{sample}.pileup', sample=SAMPLE)
 
 # ==============================================================================
@@ -308,9 +310,9 @@ rule merge_reads:
         fwd_reads = 'output/trim_adapters/{sample}.R1.fastq.gz',
         rev_reads = 'output/trim_adapters/{sample}.R2.fastq.gz'
     output:
-        fwd_reads = 'output/merge_reads/{sample}.R1.fastq.gz',
-        rev_reads = 'output/merge_reads/{sample}.R2.fastq.gz',
-        merged_reads = 'output/merge_reads/{sample}.unpaired.fastq.gz',
+        fwd_reads = temp('output/merge_reads/{sample}.R1.fastq.gz'),
+        rev_reads = temp('output/merge_reads/{sample}.R2.fastq.gz'),
+        merged_reads = temp('output/merge_reads/{sample}.unpaired.fastq.gz'),
         insert_hist = 'output/merge_reads/{sample}.hist'
     log:
         'output/merge_reads/log/{sample}.log'
@@ -787,17 +789,17 @@ rule local_realignment:
         max_realignment_reads = '1000000',
         max_cons = '100'
     resources:
-        mem_mb = 20000
+        mem_mb = 40000
     log:
         "output/local_realignment/log/{sample}.log"
     run:
         shell('java -jar {config[gatk3_jar]} -T RealignerTargetCreator '
-              '-R {input.ref '
+              '-R {input.assembly} '
               '-I {input.bam} '
               '-o {output.intervals}')
 
         shell('java -jar {config[gatk3_jar]} -T IndelRealigner '
-              '-R {input.ref} '
+              '-R {input.assembly} '
               '-I {input.bam} '
               '-o {output.bam} '
               '--targetIntervals {output.intervals} '
@@ -820,7 +822,8 @@ rule call_variants:
                 os.path.join('output', 'repeatmasker',
                              get_genotype(wildcards) + 'SC.bed'))
     output:
-        gvcf = 'output/call_variants/{sample}.g.vcf'
+        gvcf = 'output/call_variants/{sample}.g.vcf',
+        bam = 'output/call_variants/{sample}.bam'
     resources:
         mem_mb = 20000
     params:
@@ -834,7 +837,8 @@ rule call_variants:
         '-I {input.bam} '
         '--excludeIntervals {input.repeats} '
         '--emitRefConfidence GVCF '
-        '-o {output} '
+        '-o {output.gvcf} '
+        '--bamOutput {output.bam} '
         '--heterozygosity {params.snp_heterozygosity} '
         '--output_mode EMIT_ALL_SITES '
         '--indel_heterozygosity {params.indel_heterozygosity} '
@@ -856,172 +860,205 @@ rule genotype_gvcfs:
         '--includeNonVariantSites '
         '--heterozygosity {params.snp_heterozygosity} '
         '--indel_heterozygosity {params.indel_heterozygosity} '
-
-rule combine_gvcfs:
-    input:
-        unpack(match_final_assembly),
-        gvcf = lambda wildcards: [os.path.join(
-            'output', 'call_variants', sample + '.g.vcf')
-            for sample in GENOTYPE_TO_SAMPLE[wildcards.genotype]],
-        repeats = 'output/repeatmasker/{genotype}SC.bed'
-    output:
-        'output/combine_gvcfs/{genotype}.g.vcf'
-    resources:
-        mem_mb = 20000
-    run:
-        vcf_param = '-V ' + ' -V '.join(input.gvcf) + ' '
-        shell('java -jar {config[gatk3_jar]} -T CombineGVCFs ' +
-              vcf_param +
-              '-R {input.assembly} '
-              '-o {output} '
-              '--excludeIntervals {input.repeats}')
-
-rule sort_combined_gvcfs:
-    input:
-        'output/combine_gvcfs/{genotype}.g.vcf'
-    output:
-        'output/sort_combined_gvcfs/{genotype}.g.vcf'
-    resources:
-        mem_mb = 20000
-    shell:
-        'picard SortVcf I={input} O={output}'
-
-# Create multisample genotyped vcf files
-rule joint_genotype_gvcfs:
-    input:
-        unpack(match_final_assembly),
-        gvcf = 'output/sort_combined_gvcfs/{genotype}.g.vcf'
-    output:
-        'output/joint_genotype_gvcfs/{genotype}.vcf'
-    params:
-        snp_heterozygosity = 0.015,
-        indel_heterozygosity = 0.01
-    resources:
-        mem_mb = 30000
-    shell:
-        'java -jar {config[gatk3_jar]} -T GenotypeGVCFs '
-        '-R {input.assembly} '
-        '-V {input.gvcf} '
-        '-o {output} '
-        '--includeNonVariantSites '
-        '--heterozygosity {params.snp_heterozygosity} '
-        '--indel_heterozygosity {params.indel_heterozygosity}'
+#
+# rule combine_gvcfs:
+#     input:
+#         unpack(match_final_assembly),
+#         gvcf = lambda wildcards: [os.path.join(
+#             'output', 'call_variants', sample + '.g.vcf')
+#             for sample in GENOTYPE_TO_SAMPLE[wildcards.genotype]],
+#         repeats = 'output/repeatmasker/{genotype}SC.bed'
+#     output:
+#         'output/combine_gvcfs/{genotype}.g.vcf'
+#     resources:
+#         mem_mb = 20000
+#     run:
+#         vcf_param = '-V ' + ' -V '.join(input.gvcf) + ' '
+#         shell('java -jar {config[gatk3_jar]} -T CombineGVCFs ' +
+#               vcf_param +
+#               '-R {input.assembly} '
+#               '-o {output} '
+#               '--excludeIntervals {input.repeats}')
+#
+# rule sort_combined_gvcfs:
+#     input:
+#         'output/combine_gvcfs/{genotype}.g.vcf'
+#     output:
+#         'output/sort_combined_gvcfs/{genotype}.g.vcf'
+#     resources:
+#         mem_mb = 20000
+#     shell:
+#         'picard SortVcf I={input} O={output}'
+#
+# # Create multisample genotyped vcf files
+# rule joint_genotype_gvcfs:
+#     input:
+#         unpack(match_final_assembly),
+#         gvcf = 'output/sort_combined_gvcfs/{genotype}.g.vcf'
+#     output:
+#         'output/joint_genotype_gvcfs/{genotype}.vcf'
+#     params:
+#         snp_heterozygosity = 0.015,
+#         indel_heterozygosity = 0.01
+#     resources:
+#         mem_mb = 30000
+#     shell:
+#         'java -jar {config[gatk3_jar]} -T GenotypeGVCFs '
+#         '-R {input.assembly} '
+#         '-V {input.gvcf} '
+#         '-o {output} '
+#         '--includeNonVariantSites '
+#         '--heterozygosity {params.snp_heterozygosity} '
+#         '--indel_heterozygosity {params.indel_heterozygosity}'
 
 rule produce_pileup:
     input:
         unpack(match_final_assembly),
         bam = 'output/local_realignment/{sample}.bam',
-        bai = 'output/local_realignment/{sample}.bam.bai',
+        bai = 'output/local_realignment/{sample}.bam.bai'
     output:
         'output/produce_pileup/{sample}.pileup'
-    shell:
-        'bam-readcount '
-        '-f {input.assembly} '
-        '--max-warnings 1 '
-        '{input.bam}'
-
-# Remove variants which have coverage outside of the target range.
-rule depth_filter_variants:
-    input:
-        'output/joint_genotype_gvcfs/{genotype}.small.tsv'
-    output:
-        tsv = 'output/depth_filter_variants/{genotype}.tsv',
-        summary = 'output/depth_filter_variants/{genotype}.txt'
-    params:
-        min = 20,
-        max = 100
     resources:
-        mem_mb = 10000
+        mem_mb = 20000
     shell:
-        'scripts/depth_filter_variants.py '
-        '--min-depth {params.min} '
-        '--max-depth {params.max} '
-        '--summary {output.summary} '
-        '--output {output.tsv} {input}'
+        'samtools mpileup -aa -f {input.assembly} {input.bam} | '
+        'sed \'s/          /       *       */g\' | '
+        '{config[mpileup2readcounts]} 1 -5 false 0 0 >{output}'
+
+# rule depth_filter_pileup:
+#     input:
+#         expand('output/produce_pileup/{sample}.pileup', sample=SAMPLE)
+#     output:
+#         expand('output/depth_filter_pileup/{sample}.pileup', sample=SAMPLE)
+#     params:
+#         min_depth = 20,
+#         max_depth = 100,
+#         outdir='output/depth_filter_pileup',
+#         summary='output/depth_filter_pileup/{sample}.txt'
+#     run:
+#         for genotype in GENOTYPE:
+#             input_files = ' '.join([
+#                 os.path.join('output', 'produce_pileup', sample)
+#                 for sample in GENOTYPE_TO_SAMPLE[genotype]
+#             ])
+#             shell(
+#                 'scripts/depth_filter_pileup.py '
+#                 '--min-depth {params.min_depth} '
+#                 '--max-depth {params.max_depth} '
+#                 '--summary {params.summary} '
+#                 '--outdir {params.outdir} ' +
+#                 input_files
+#             )
+#
+# # Remove variants which have coverage outside of the target range.
+# rule depth_filter_variants:
+#     input:
+#         'output/joint_genotype_gvcfs/{genotype}.small.tsv'
+#     output:
+#         tsv = 'output/depth_filter_variants/{genotype}.tsv',
+#         summary = 'output/depth_filter_variants/{genotype}.txt'
+#     params:
+#         min = 20,
+#         max = 100
+#     resources:
+#         mem_mb = 10000
+#     shell:
+#         'scripts/depth_filter_variants.py '
+#         '--min-depth {params.min} '
+#         '--max-depth {params.max} '
+#         '--summary {output.summary} '
+#         '--output {output.tsv} {input}'
 
 
 # Count the total number of callable sites for each sample and add the
 # information to the line info metadata.
-rule count_callable_loci:
-    input:
-        assembly = expand('output/filter_zero_coverage/{genotype}SC.fasta',
-                genotype=GENOTYPE),
-        depth_filtered = expand('output/depth_filter_variants/{genotype}.txt',
-                genotype=GENOTYPE),
-        masked = expand('output/repeatmasker/{genotype}SC.bed',
-                genotype=GENOTYPE)
-    output:
-        line_info = 'output/count_callable_loci/line_info.csv'
-    run:
-        line_info = read_csv(config['line_info'])
-        line_info['bases_surveyed'] = np.nan
-        input_sources = zip(
-                input.assembly,
-                input.masked,
-                input.depth_filtered,
-                GENOTYPE)
-        for assembly, masked, depth_filtered, genotype in input_sources:
-            num_masked = int(calc_bed_length(masked).rstrip())
-            with open(depth_filtered, 'r') as inp:
-                num_depth_filtered = int(inp.read().rstrip())
-            assembly_length = int(calc_fasta_length(assembly).rstrip())
-            num_callable = assembly_length - num_depth_filtered - num_masked
-            genotype_idx = [x.startswith(genotype) for x in line_info['sample']]
-            line_info.loc[genotype_idx, 'bases_surveyed'] = num_callable
-        line_info.to_csv(output.line_info, index=False)
+# rule count_callable_loci:
+#     input:
+#         assembly = expand('output/filter_zero_coverage/{genotype}SC.fasta',
+#                 genotype=GENOTYPE),
+#         depth_filtered = expand('output/depth_filter_variants/{genotype}.txt',
+#                 genotype=GENOTYPE),
+#         masked = expand('output/repeatmasker/{genotype}SC.bed',
+#                 genotype=GENOTYPE)
+#     output:
+#         line_info = 'output/count_callable_loci/line_info.csv'
+#     run:
+#         line_info = read_csv(config['line_info'])
+#         line_info['bases_surveyed'] = np.nan
+#         input_sources = zip(
+#                 input.assembly,
+#                 input.masked,
+#                 input.depth_filtered,
+#                 GENOTYPE)
+#         for assembly, masked, depth_filtered, genotype in input_sources:
+#             num_masked = int(calc_bed_length(masked).rstrip())
+#             with open(depth_filtered, 'r') as inp:
+#                 num_depth_filtered = int(inp.read().rstrip())
+#             assembly_length = int(calc_fasta_length(assembly).rstrip())
+#             num_callable = assembly_length - num_depth_filtered - num_masked
+#             genotype_idx = [x.startswith(genotype) for x in line_info['sample']]
+#             line_info.loc[genotype_idx, 'bases_surveyed'] = num_callable
+#         line_info.to_csv(output.line_info, index=False)
 
 
 # Filter out variants which are present in multiple samples
-rule filter_shared_variants:
-    input:
-        expand('output/depth_filter_variants/{genotype}.tsv',
-                genotype=GENOTYPE)
-    output:
-        expand('output/filter_shared_variants/{sample}.tsv',
-                sample=SAMPLE)
-    params:
-        cutoff = 0.2
-    threads: 9
-    run:
-        outdir = os.path.dirname(output[0])
-        shell('parallel -j {threads} '
-              '"scripts/filter_shared_alleles.py '
-              '--het-cutoff {params.cutoff} '
-              '--outdir ' + outdir + '" ' +
-              '::: {input}')
-
+# rule filter_shared_variants:
+#     input:
+#         expand('output/depth_filter_variants/{genotype}.tsv',
+#                 genotype=GENOTYPE)
+#     output:
+#         expand('output/filter_shared_variants/{sample}.tsv',
+#                 sample=SAMPLE)
+#     params:
+#         cutoff = 0.2
+#     threads: 9
+#     run:
+#         outdir = os.path.dirname(output[0])
+#         shell('parallel -j {threads} '
+#               '"scripts/filter_shared_alleles_gatk.py '
+#               '--het-cutoff {params.cutoff} '
+#               '--outdir ' + outdir + '" ' +
+#               '::: {input}')
+#
 # Filter variants in the per-sample .vcf files using the the merged, filtered
 # variant tables.
-rule filter_per_sample_variants:
-    input:
-        tsv = 'output/filter_shared_variants/{sample}.tsv',
-        vcf = 'output/genotype_gvcfs/{sample}.vcf'
-    output:
-        'output/filter_per_sample_variants/{sample}.vcf'
-    resources:
-        mem_mb = 20000
-    shell:
-        # Extract the vcf header
-        "grep '^#' {input.vcf} > {output};"
+# rule filter_per_sample_variants:
+#     input:
+#         unpack(match_final_assembly),
+#         tsv = 'output/filter_shared_variants/{sample}.tsv',
+#         vcf = 'output/genotype_gvcfs/{sample}.vcf'
+#     output:
+#         'output/filter_per_sample_variants/{sample}.vcf'
+#     resources:
+#         mem_mb = 20000
+#     shell:
+#         # Extract the vcf header
+#         "grep '^#' {input.vcf} > {output};"
+#
+#         # Filter out all variant positions in input.vcf which are not in
+#         # input.tsv
+#         "cat {input.tsv} | "
+#         "awk '{{printf \"%s\\t%s\\t\\n\", $1, $2}}' | "
+#         "grep -f /dev/stdin {input.vcf} >> {output};"
+#
+#         # This is done so that gatk creates a vcf index file
+#         "java -jar {config[gatk3_jar]} -T ValidateVariants "
+#         "-R {input.assembly} "
+#         "-V {output} "
 
-        # Filter out all variant positions in input.vcf which are not in
-        # input.tsv
-        "cat {input.tsv} | "
-        "awk '{{printf \"%s\\t%s\\t\\n\", $1, $2}}' | "
-        "grep -f /dev/stdin {input.vcf} >> {output}"
 
-rule extract_variant_coverage:
-    input:
-        'output/filter_per_sample_variants/{sample}.vcf'
-    output:
-        'output/extract_variant_coverage{iter}/{sample}.txt',
-    shell:
-        'extract_variant_coverage.py -o {output} {input}'
-
+# rule extract_variant_coverage:
+#     input:
+#         'output/filter_per_sample_variants/{sample}.vcf'
+#     output:
+#         'output/extract_variant_coverage{iter}/{sample}.txt',
+#     shell:
+#         'extract_variant_coverage.py -o {output} {input}'
+#
 rule select_variants:
     input:
         unpack(match_final_assembly),
-        vcf = 'output/filter_per_sample_variants/{sample}.vcf',
+        vcf = 'output/genotype_gvcfs/{sample}.vcf'
     output:
         'output/select_variants/{sample}.{vartype}.vcf'
     run:
@@ -1038,19 +1075,6 @@ rule select_variants:
               '-V {input.vcf} '
               '-o {output} ' +
               criteria)
-
-rule exclude_nonvariants:
-    input:
-        unpack(match_final_assembly),
-        vcf = 'output/select_variants/{sample}.{vartype}.vcf',
-    output:
-        vcf = 'output/exclude_nonvariants/{sample}.{vartype}.vcf'
-    shell:
-        'java -jar {config[gatk3_jar]} SelectVariants '
-        '-R {input.assembly} '
-        '-V {input.vcf} '
-        '--excludeNonVariants '
-        '-o {output.vcf}'
 
 rule extract_variant_quality_metrics:
     input:
@@ -1076,6 +1100,21 @@ rule plot_variant_quality_metrics:
         'output/plot_variant_quality_metrics/{sample}.svg'
     script:
         'scripts/plot_variant_quality_scores.R'
+
+
+rule exclude_nonvariants:
+    input:
+        unpack(match_final_assembly),
+        vcf = 'output/select_variants/{sample}.{vartype}.vcf',
+    output:
+        vcf = 'output/exclude_nonvariants/{sample}.{vartype}.vcf'
+    shell:
+        'java -jar {config[gatk3_jar]} SelectVariants '
+        '-R {input.assembly} '
+        '-V {input.vcf} '
+        '--excludeNonVariants '
+        '-o {output.vcf}'
+
 
 # Filter variants using GATK quality metrics
 rule filter_variants:
@@ -1143,11 +1182,13 @@ rule vcf_to_small_tsv:
         vcf = 'output/{dir}/{sample}.vcf'
     output:
         'output/{dir}/{sample}.small.tsv'
+    resources:
+        mem_mb = 20000
     shell:
         'java -jar {config[gatk3_jar]} -T VariantsToTable '
         '-R {input.assembly} '
         '-V {input.vcf} '
-        '-O {output} '
+        '-o {output} '
         '-F CHROM -F POS -F DP -GF AD -GF DP'
 
 rule vcf_to_tsv:
@@ -1206,6 +1247,32 @@ rule realign_IAEC1:
               'samtools view -bh - | '
               'samtools sort - > {output}')
 
+
+rule realign_IB2:
+    input:
+        fwd_reads = 'output/filter_contamination_reduced/IB2.R1.fastq.gz',
+        rev_reads = 'output/filter_contamination_reduced/IB2.R2.fastq.gz',
+        unpaired_reads = (
+            'output/filter_contamination_reduced/IAEC1.unpaired.fastq.gz'),
+        assembly = 'output/filter_zero_coverage/{genotype}SC.fasta',
+        indices = ['output/filter_zero_coverage/{genotype}SC' + suffix
+                   for suffix in INDEX_SUFFIXES]
+    output:
+        'output/realign_IB2/IB2_to_{genotype}SC.bam'
+    threads: 12
+    resources:
+        mem_mb = 20000
+    params:
+        max_insert = 1000
+    run:
+        index_prefix = os.path.splitext(input.assembly)[0]
+        shell('bowtie2 -1 {input.fwd_reads} -2 {input.rev_reads} '
+              '-U {input.unpaired_reads} -X {params.max_insert} '
+              '-x ' + index_prefix + ' --rg-id=IB2 '
+              '--rg=LIB:IB2 --rg=PL:illumina '
+              '--rg=SM:IB2 -p {threads} | '
+              'samtools view -bh - | '
+              'samtools sort - > {output}')
 
 #
 # ==============================================================================
