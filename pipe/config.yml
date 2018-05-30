@@ -16,3 +16,4 @@ mitochondrial_reference: input/ref/magna.mt.europe.fa
 nuclear_reference: input/ref/magna.nuc.fa
 repeat_library: input/repeat_library/UC-families.fa
 line_info: input/metadata/line_info.csv
+mpileup2readcounts: util/mpileup2readcounts/mpileup2readcounts
