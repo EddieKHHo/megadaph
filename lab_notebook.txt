@@ -974,4 +974,12 @@ Examined the mitochondrial alignments of IAEC1/IAEC2 vs IB and IC samples.
 
 Realized the probable cause of the extra variants! My unique variant filtering
 step does not distinguish between gene conversion and de novo mutations. I've
-spent too long studying mitochondria for my own good!
+spent too long studying mitochondria for my own good.
+
+Reimplemented the uniqueness filter.
+- Results look a lot better, with no samples have hugely elevated numbers of
+  mutations. The numbers are in general still too high though. I examined a few
+  mutations in IGV and found clear cases where alternative alleles were present
+  in multiple samples. It looks like I'll have to reimplement the filter using
+  the raw readcounts after all since GATK's numbers are not completely
+  informative.
