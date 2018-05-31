@@ -754,6 +754,16 @@ rule repeatmasker2bed:
     shell:
         'rmsk2bed < {input} | cut -f 1-3 > {output}'
 
+rule invert_repeatmasker_bed:
+    input:
+        unpack(match_final_assembly),
+        bed = 'output/repeatmasker/{genotype}SC.bed'
+    output:
+        'output/repeatmasker/{genotype}SC.inverted.bed'
+    shell:
+        'invert_bed {input.assembly} {input.bed} >{output}'
+
+
 # ==============================================================================
 # Variant Calling Pre-Processing
 # ==============================================================================
@@ -915,13 +925,22 @@ rule produce_pileup:
     input:
         unpack(match_final_assembly),
         bam = 'output/local_realignment/{sample}.bam',
-        bai = 'output/local_realignment/{sample}.bam.bai'
+        bai = 'output/local_realignment/{sample}.bam.bai',
+        intervals = lambda wildcards: (
+            ''.join(
+                ['output/repeatmasker/', wildcards.sample[0:2],
+                     'SC.inverted.bed'
+                ]
+            )
+        )
+
     output:
         'output/produce_pileup/{sample}.pileup'
     resources:
         mem_mb = 20000
     shell:
-        'samtools mpileup -aa -f {input.assembly} {input.bam} | '
+        'samtools mpileup -a -l {input.intervals} -f {input.assembly} '
+        '{input.bam} | '
         'sed \'s/          /       *       */g\' | '
         '{config[mpileup2readcounts]} 1 -5 false 0 0 >{output}'
 
@@ -1120,7 +1139,7 @@ rule exclude_nonvariants:
 rule filter_variants:
     input:
         unpack(match_final_assembly),
-        vcf = 'output/select_variants/{sample}.{vartype}.vcf',
+        vcf = 'output/exclude_nonvariants/{sample}.{vartype}.vcf',
     output:
         'output/filter_variants/{sample}.{vartype}.vcf'
     params:
