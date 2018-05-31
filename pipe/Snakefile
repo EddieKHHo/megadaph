@@ -197,8 +197,6 @@ rule all:
         'output/count_callable_loci/line_info.csv',
         expand('output/plot_variant_quality_metrics/{sample}.svg',
                sample=SAMPLE),
-        expand('output/filter_shared_variants/{sample}.tsv',
-               sample=SAMPLE),
         expand('output/genotype_gvcfs/{sample}.vcf', sample=SAMPLE),
         expand('output/remove_filtered_variants/{sample}.{vartype}.big.tsv',
                 sample=SAMPLE, vartype=VARIANT_TYPES),
@@ -206,10 +204,10 @@ rule all:
                 sample=SAMPLE),
         expand('output/align_to_assembly_raw_to_final/{sample}.bam.bai',
                 sample=SAMPLE),
-        expand('output/realign_IAEC1/IAEC1_to_{genotype}SC.bam',
-                genotype=GENOTYPE),
-        expand('output/realign_IB2/IB2_to_{genotype}SC.bam',
-                genotype=GENOTYPE),
+        expand('output/find_shared_alleles/{genotype}.tsv', genotype=GENOTYPE),
+        expand(
+            'output/find_extreme_depth_sites/{genotype}.tsv', genotype=GENOTYPE
+        ),
         expand('output/produce_pileup/{sample}.pileup', sample=SAMPLE)
 
 # ==============================================================================
@@ -944,49 +942,39 @@ rule produce_pileup:
         'sed \'s/          /       *       */g\' | '
         '{config[mpileup2readcounts]} 1 -5 false 0 0 >{output}'
 
-# rule depth_filter_pileup:
-#     input:
-#         expand('output/produce_pileup/{sample}.pileup', sample=SAMPLE)
-#     output:
-#         expand('output/depth_filter_pileup/{sample}.pileup', sample=SAMPLE)
-#     params:
-#         min_depth = 20,
-#         max_depth = 100,
-#         outdir='output/depth_filter_pileup',
-#         summary='output/depth_filter_pileup/{sample}.txt'
-#     run:
-#         for genotype in GENOTYPE:
-#             input_files = ' '.join([
-#                 os.path.join('output', 'produce_pileup', sample)
-#                 for sample in GENOTYPE_TO_SAMPLE[genotype]
-#             ])
-#             shell(
-#                 'scripts/depth_filter_pileup.py '
-#                 '--min-depth {params.min_depth} '
-#                 '--max-depth {params.max_depth} '
-#                 '--summary {params.summary} '
-#                 '--outdir {params.outdir} ' +
-#                 input_files
-#             )
-#
-# # Remove variants which have coverage outside of the target range.
-# rule depth_filter_variants:
-#     input:
-#         'output/joint_genotype_gvcfs/{genotype}.small.tsv'
-#     output:
-#         tsv = 'output/depth_filter_variants/{genotype}.tsv',
-#         summary = 'output/depth_filter_variants/{genotype}.txt'
-#     params:
-#         min = 20,
-#         max = 100
-#     resources:
-#         mem_mb = 10000
-#     shell:
-#         'scripts/depth_filter_variants.py '
-#         '--min-depth {params.min} '
-#         '--max-depth {params.max} '
-#         '--summary {output.summary} '
-#         '--output {output.tsv} {input}'
+rule find_extreme_depth_sites:
+    input:
+        lambda wildcards: (
+            [
+                'output/produce_pileup/' + sample + '.pileup'
+                for sample in GENOTYPE_TO_SAMPLE[wildcards.genotype]
+            ]
+        )
+    output:
+        'output/find_extreme_depth_sites/{genotype}.tsv'
+    params:
+        min_depth = 20,
+        max_depth = 100
+    shell:
+        'scripts/find_extreme_depth_sites.py '
+        '--min-depth {params.min_depth} '
+        '--max-depth {params.max_depth} '
+        '{input} >{output}'
+
+
+rule find_shared_alleles:
+    input:
+        lambda wildcards: (
+            [
+                'output/produce_pileup/' + sample + '.pileup'
+                for sample in GENOTYPE_TO_SAMPLE[wildcards.genotype]
+            ]
+        )
+    output:
+        'output/find_shared_alleles/{genotype}.tsv'
+    shell:
+        'scripts/find_shared_alleles.py {input} >{output}'
+
 
 
 # Count the total number of callable sites for each sample and add the
