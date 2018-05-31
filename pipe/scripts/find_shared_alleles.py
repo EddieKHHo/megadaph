@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """Find variants which are unique to sample from mpileup2readcounts output."""
 import sys
 
@@ -60,8 +60,8 @@ def find_shared_indel_pos(per_sample_counts, indel_type):
     if nrow(shared_indels) > 0:
         for column_index in shared_indels:
             column = shared_indels[column_index].dropna()
-            sequence_ids = per_sample_counts[0].iloc[column.index]["chr"]
-            positions = per_sample_counts[0].iloc[column.index]["loc"]
+            sequence_ids = per_sample_counts[0].loc[column.index]["chr"]
+            positions = per_sample_counts[0].loc[column.index]["loc"]
             shared_pos = DataFrame(
                 {"chr": sequence_ids, "loc": positions, "alt": column}
             )
@@ -136,7 +136,7 @@ def find_shared_alleles(pileups):
     readcount_iter = [read_csv(f, sep="\t", chunksize=100000) for f in pileups]
     for chunks in zip(*readcount_iter):
         shared_allele_pos = find_shared_allele_pos(chunks)
-        shared_allele_pos.to_string(sys.stdout)
+        shared_allele_pos.to_string(sys.stdout, header=False, index=False)
 
 
 if __name__ == "__main__":
