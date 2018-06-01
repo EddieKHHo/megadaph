@@ -2,7 +2,7 @@
 import os
 from uuid import uuid4
 
-from fmbiopy.fmlist import flatten
+from fmbiopy.iter import flatten
 from fmbiopy.io import read_header
 import numpy as np
 from pandas import read_csv
@@ -1169,12 +1169,12 @@ rule calc_number_filtered_sites:
         'echo "\nSites postfilter: " >> {output}; '
         'grep -vc "^#" {input.post} >> {output}'
 
-rule remove_filtered_variants:
+rule remove_gatk_filtered_variants:
     input:
         unpack(match_final_assembly),
         vcf = 'output/gatk_filter_variants/{sample}.{vartype}.vcf',
     output:
-        'output/remove_filtered_variants/{sample}.{vartype}.vcf'
+        'output/remove_gatk_filtered_variants/{sample}.{vartype}.vcf'
     shell:
         'java -jar {config[gatk3_jar]} -T SelectVariants '
         '-R {input.assembly} '
@@ -1182,6 +1182,28 @@ rule remove_filtered_variants:
         '-o {output} '
         '--excludeFiltered '
         '--excludeNonVariants'
+
+
+rule custom_filter_variants:
+    input:
+        variants = (
+            'output/remove_gatk_filtered_variants/{sample}.{vartype}.big.tsv'
+        ),
+        shared_alleles = lambda wildcards: (
+            'output/find_shared_alleles/' + get_genotype(wildcards) + '.tsv'
+        ),
+        extreme_depth = lambda wildcards: (
+            'output/find_extreme_depth_sites/' + get_genotype(wildcards) +
+            '.tsv'
+        )
+    output:
+        'output/custom_filter_variants/{sample}.{vartype}.big.tsv'
+    shell:
+        'scripts/filter_variants.py '
+        '--extreme-depth {input.extreme_depth} '
+        '--shared-alleles {input.shared_alleles} '
+        '>{output}'
+
 
 rule vcf_to_small_tsv:
     input:
@@ -1209,8 +1231,8 @@ rule vcf_to_tsv:
         '-R {input.assembly} '
         '-V {input.vcf} '
         '-o {output} '
-        '-F CHROM -F POS -GF GT -F QUAL -F MQ -F DP -F TRANSITION -GF AD '
-        '-GF DP -F TYPE'
+        '-F CHROM -F POS -F REF -F ALT -GF GT -F QUAL -F MQ -F DP '
+        '-F TRANSITION -GF AD -GF DP -F TYPE'
 
 
 # rule calc_mutation_rate:
