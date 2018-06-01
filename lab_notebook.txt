@@ -983,3 +983,9 @@ Reimplemented the uniqueness filter.
   in multiple samples. It looks like I'll have to reimplement the filter using
   the raw readcounts after all since GATK's numbers are not completely
   informative.
+
+===============================================================================
+June 1st, 2018
+===============================================================================
+- Uniqueness filter and depth filter have been reimplemented to work on
+  readcount files.
