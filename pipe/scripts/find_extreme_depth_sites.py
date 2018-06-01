@@ -22,7 +22,7 @@ def find_extreme_depth(per_sample_counts, min_depth, max_depth):
     medians = DataFrame(per_sample_coverage).median(axis=0)
     outside_range = (medians < min_depth) | (medians > max_depth)
     extreme_depth_sites = per_sample_counts[0].loc[outside_range][
-        ["chr", "loc"]
+        ["chr", "pos"]
     ]
     return extreme_depth_sites
 
@@ -36,8 +36,10 @@ def find_extreme_depth(per_sample_counts, min_depth, max_depth):
 def find_extreme_depth_sites(max_depth, min_depth, pileups):
     readcount_iter = [read_csv(f, sep="\t", chunksize=100000) for f in pileups]
     for chunks in zip(*readcount_iter):
+        chunks = [chunk.rename(columns={'loc': 'pos'}) for chunk in chunks]
         extreme_depth_sites = find_extreme_depth(chunks, min_depth, max_depth)
-        extreme_depth_sites.to_string(sys.stdout)
+        extreme_depth_sites.to_string(sys.stdout, header=False, index=False)
+        sys.stdout.write("\n")
 
 
 if __name__ == "__main__":

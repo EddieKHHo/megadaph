@@ -45,7 +45,7 @@ def find_shared_indel_pos(per_sample_counts, indel_type):
     Returns
     -------
     DataFrame
-        DataFrame with 3 columns: ["chr", "loc", "alt"]. If multiple shared
+        DataFrame with 3 columns: ["chr", "pos", "alt"]. If multiple shared
         shared indels are found at a site, multiple rows will be returned.
 
     """
@@ -61,9 +61,9 @@ def find_shared_indel_pos(per_sample_counts, indel_type):
         for column_index in shared_indels:
             column = shared_indels[column_index].dropna()
             sequence_ids = per_sample_counts[0].loc[column.index]["chr"]
-            positions = per_sample_counts[0].loc[column.index]["loc"]
+            positions = per_sample_counts[0].loc[column.index]["pos"]
             shared_pos = DataFrame(
-                {"chr": sequence_ids, "loc": positions, "alt": column}
+                {"chr": sequence_ids, "pos": positions, "alt": column}
             )
             shared_indel_pos = shared_indel_pos.append(shared_pos)
     return shared_indel_pos
@@ -82,7 +82,7 @@ def find_shared_base_pos(per_sample_counts, base):
     Returns
     -------
     DataFrame
-        DataFrame with 3 columns: ["chr", "loc", "alt"].
+        DataFrame with 3 columns: ["chr", "pos", "alt"].
 
     """
     ref_bases = per_sample_counts[0]["ref"]
@@ -91,9 +91,9 @@ def find_shared_base_pos(per_sample_counts, base):
     )
     if sum(is_shared_base):
         sequence_ids = per_sample_counts[0].loc[is_shared_base]["chr"]
-        positions = per_sample_counts[0].loc[is_shared_base]["loc"]
+        positions = per_sample_counts[0].loc[is_shared_base]["pos"]
         shared_base_pos = DataFrame(
-            {"chr": sequence_ids, "loc": positions, "alt": base}
+            {"chr": sequence_ids, "pos": positions, "alt": base}
         )
     else:
         shared_base_pos = DataFrame()
@@ -135,8 +135,11 @@ def find_shared_allele_pos(per_sample_counts):
 def find_shared_alleles(pileups):
     readcount_iter = [read_csv(f, sep="\t", chunksize=100000) for f in pileups]
     for chunks in zip(*readcount_iter):
+        # Rename "loc" column so that it doesn't cause issues with loc indexing
+        chunks = [chunk.rename(columns = {'loc': 'pos'}) for chunk in chunks]
         shared_allele_pos = find_shared_allele_pos(chunks)
         shared_allele_pos.to_string(sys.stdout, header=False, index=False)
+        sys.stdout.write("\n")
 
 
 if __name__ == "__main__":
