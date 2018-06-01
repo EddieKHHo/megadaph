@@ -4,7 +4,7 @@
 To pass this filtering step, variant positions must:
     1. Have min_depth < depth < max_depth across all samples
     2. Show no evidence for being present across multiple samples.
-    3. Be a novel heteroygous variant (not loss of heterozygosity)
+    3. Be a novel heterozygous variant (not loss of heterozygosity)
 
 Variant tables are read into memory directly so only potential variant sites
 should be provided to this step.
@@ -13,7 +13,6 @@ import sys
 
 import click
 from fmbiopy.df import df_subtract
-from numpy import int64
 from pandas import read_csv
 
 
@@ -29,7 +28,7 @@ variants = read_csv("output/exclude_nonvariants/GA3.tsv", delim_whitespace=True)
     help="File containing list of sites with extreme read depth",
 )
 @click.option(
-    "--shared_alleles",
+    "--shared-alleles",
     type=click.File("r"),
     help=(
         "File containing list of potential variants which are found in "
@@ -41,6 +40,7 @@ variants = read_csv("output/exclude_nonvariants/GA3.tsv", delim_whitespace=True)
 )
 def filter_variants(extreme_depth, shared_alleles, variants):
     filtered_variants = read_csv(variants, sep="\t")
+
     for depth_chunk in read_csv(
         extreme_depth,
         delim_whitespace=True,
