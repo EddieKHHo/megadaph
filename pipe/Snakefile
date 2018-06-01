@@ -954,7 +954,7 @@ rule find_extreme_depth_sites:
         'output/find_extreme_depth_sites/{genotype}.tsv'
     params:
         min_depth = 20,
-        max_depth = 100
+        max_depth = 150
     shell:
         'scripts/find_extreme_depth_sites.py '
         '--min-depth {params.min_depth} '
