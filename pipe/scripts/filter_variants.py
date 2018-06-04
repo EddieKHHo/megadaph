@@ -13,12 +13,8 @@ import sys
 
 import click
 from fmbiopy.df import df_subtract
+from numpy import float64
 from pandas import read_csv
-
-
-extreme_depth = "output/find_extreme_depth_sites/GA.tsv"
-shared_alleles = "output/find_shared_alleles/GA.tsv"
-variants = read_csv("output/exclude_nonvariants/GA3.tsv", delim_whitespace=True)
 
 
 @click.command()
@@ -35,9 +31,7 @@ variants = read_csv("output/exclude_nonvariants/GA3.tsv", delim_whitespace=True)
         "multiple samples"
     ),
 )
-@click.argument(
-    "vcf", nargs=1, type=click.File("r"), help="VCF file to filter."
-)
+@click.argument("variants", nargs=1, type=click.File("r"))
 def filter_variants(extreme_depth, shared_alleles, variants):
     filtered_variants = read_csv(variants, sep="\t")
 
@@ -55,7 +49,9 @@ def filter_variants(extreme_depth, shared_alleles, variants):
         delim_whitespace=True,
         chunksize=100000,
         header=None,
-        names=["CHROM", "POS", "ALT"],
+        names=["CHROM", "POS", "REF", "ALT"],
+        dtype={"CHROM": str, "POS": float64, "REF": str, "ALT": str},
     ):
         filtered_variants = df_subtract(filtered_variants, shared_chunk)
+    filtered_variants = filtered_variants[filtered_variants["ALT"] != "*"]
     filtered_variants.to_csv(sys.stdout, sep="\t", index=False)

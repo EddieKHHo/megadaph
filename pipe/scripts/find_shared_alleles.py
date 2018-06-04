@@ -7,9 +7,23 @@ from fmbiopy.readcounts import (
     destrand_counts,
     find_shared_bases,
     find_shared_indels,
-    READCOUNT_DTYPE
+    READCOUNT_DTYPE,
 )
 from pandas import DataFrame, read_csv
+
+pileups = [
+    "/home/fen-arch/fmacrae/megadaph.private/megadaph/pipe/output/produce_pileup/FA10.head.pileup",
+    "/home/fen-arch/fmacrae/megadaph.private/megadaph/pipe/output/produce_pileup/FA7.head.pileup",
+    "/home/fen-arch/fmacrae/megadaph.private/megadaph/pipe/output/produce_pileup/FAEC1.head.pileup",
+]
+
+from pandas import read_csv
+
+readcount_iter = [
+    read_csv(pileup, sep="\t", chunksize=10000) for pileup in pileups
+]
+
+per_sample_counts = next(zip(*readcount_iter))
 
 
 def nrow(df):
@@ -52,18 +66,37 @@ def find_shared_indel_pos(per_sample_counts, indel_type):
     """
     shared_indel_pos = DataFrame()
     ref_bases = per_sample_counts[0]["ref"]
+    # Build a dataframe of shared indels with row indices from
+    # `per_sample_counts`. If multiple shared indels are present at a position,
+    # split them across multiple columns.
     shared_indels = (
         find_shared_indels(per_sample_counts, indel_type)
         .pipe(prepend_ref_base, ref_bases)
         .pipe(expand_list_column)
     )
     if nrow(shared_indels) > 0:
+        # Loop through indel columns, appending each to table of discovered
+        # positions
         for column_index in shared_indels:
-            column = shared_indels[column_index].dropna()
-            sequence_ids = per_sample_counts[0].loc[column.index]["chr"]
-            positions = per_sample_counts[0].loc[column.index]["pos"]
+            indel_column = shared_indels[column_index].dropna()
+            sequence_ids = per_sample_counts[0].loc[indel_column.index, "chr"]
+            positions = per_sample_counts[0].loc[indel_column.index, "pos"]
+
+            if indel_type == "Insertion":
+                ref = ref_bases[indel_column.index]
+                alt = indel_column
+            elif indel_type == "Deletion":
+                # Deleted bases are added to the ref column in vcf files.
+                ref = indel_column
+                alt = ref_bases[indel_column.index]
+
             shared_pos = DataFrame(
-                {"chr": sequence_ids, "pos": positions, "alt": column}
+                {
+                    "chr": sequence_ids.values,
+                    "pos": positions,
+                    "ref": ref,
+                    "alt": alt,
+                }
             )
             shared_indel_pos = shared_indel_pos.append(shared_pos)
     return shared_indel_pos
@@ -139,9 +172,7 @@ def find_shared_alleles(pileups):
     ]
     for chunks in zip(*readcount_iter):
         # Rename "loc" column so that it doesn't cause issues with loc indexing
-        chunks = [chunk.rename(columns = {'loc': 'pos'}) for chunk in chunks]
-        import pdb
-        pdb.set_trace()
+        chunks = [chunk.rename(columns={"loc": "pos"}) for chunk in chunks]
         shared_allele_pos = find_shared_allele_pos(chunks)
         if shared_allele_pos.shape[0] > 0:
             shared_allele_pos.to_string(sys.stdout, header=False, index=False)
