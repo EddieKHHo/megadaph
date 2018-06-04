@@ -10,7 +10,7 @@ import sys
 import click
 from pandas import DataFrame, read_csv
 
-from fmbiopy.readcounts import destrand_counts
+from fmbiopy.readcounts import destrand_counts, READCOUNT_DTYPE
 
 
 def find_extreme_depth(per_sample_counts, min_depth, max_depth):
@@ -34,12 +34,16 @@ def find_extreme_depth(per_sample_counts, min_depth, max_depth):
     "pileups", type=click.Path(exists=True, dir_okay=False), nargs=-1
 )
 def find_extreme_depth_sites(max_depth, min_depth, pileups):
-    readcount_iter = [read_csv(f, sep="\t", chunksize=100000) for f in pileups]
+    readcount_iter = [
+        read_csv(f, sep="\t", chunksize=100000, dtype=READCOUNT_DTYPE)
+        for f in pileups
+    ]
     for chunks in zip(*readcount_iter):
         chunks = [chunk.rename(columns={'loc': 'pos'}) for chunk in chunks]
         extreme_depth_sites = find_extreme_depth(chunks, min_depth, max_depth)
-        extreme_depth_sites.to_string(sys.stdout, header=False, index=False)
-        sys.stdout.write("\n")
+        if extreme_depth_sites.shape[0] > 0:
+            extreme_depth_sites.to_string(sys.stdout, header=False, index=False)
+            sys.stdout.write("\n")
 
 
 if __name__ == "__main__":

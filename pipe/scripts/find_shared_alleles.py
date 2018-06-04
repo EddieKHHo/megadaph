@@ -7,6 +7,7 @@ from fmbiopy.readcounts import (
     destrand_counts,
     find_shared_bases,
     find_shared_indels,
+    READCOUNT_DTYPE
 )
 from pandas import DataFrame, read_csv
 
@@ -56,7 +57,6 @@ def find_shared_indel_pos(per_sample_counts, indel_type):
         .pipe(prepend_ref_base, ref_bases)
         .pipe(expand_list_column)
     )
-    shared_indels.index -= 1
     if nrow(shared_indels) > 0:
         for column_index in shared_indels:
             column = shared_indels[column_index].dropna()
@@ -133,13 +133,19 @@ def find_shared_allele_pos(per_sample_counts):
 @click.command()
 @click.argument("pileups", click.Path(exists=True, dir_okay=False), nargs=-1)
 def find_shared_alleles(pileups):
-    readcount_iter = [read_csv(f, sep="\t", chunksize=100000) for f in pileups]
+    readcount_iter = [
+        read_csv(f, sep="\t", chunksize=100000, dtype=READCOUNT_DTYPE)
+        for f in pileups
+    ]
     for chunks in zip(*readcount_iter):
         # Rename "loc" column so that it doesn't cause issues with loc indexing
         chunks = [chunk.rename(columns = {'loc': 'pos'}) for chunk in chunks]
+        import pdb
+        pdb.set_trace()
         shared_allele_pos = find_shared_allele_pos(chunks)
-        shared_allele_pos.to_string(sys.stdout, header=False, index=False)
-        sys.stdout.write("\n")
+        if shared_allele_pos.shape[0] > 0:
+            shared_allele_pos.to_string(sys.stdout, header=False, index=False)
+            sys.stdout.write("\n")
 
 
 if __name__ == "__main__":
