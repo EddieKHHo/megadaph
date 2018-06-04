@@ -11,20 +11,6 @@ from fmbiopy.readcounts import (
 )
 from pandas import DataFrame, read_csv
 
-pileups = [
-    "/home/fen-arch/fmacrae/megadaph.private/megadaph/pipe/output/produce_pileup/FA10.head.pileup",
-    "/home/fen-arch/fmacrae/megadaph.private/megadaph/pipe/output/produce_pileup/FA7.head.pileup",
-    "/home/fen-arch/fmacrae/megadaph.private/megadaph/pipe/output/produce_pileup/FAEC1.head.pileup",
-]
-
-from pandas import read_csv
-
-readcount_iter = [
-    read_csv(pileup, sep="\t", chunksize=10000) for pileup in pileups
-]
-
-per_sample_counts = next(zip(*readcount_iter))
-
 
 def nrow(df):
     """Return number of rows in a DataFrame."""
@@ -123,8 +109,8 @@ def find_shared_base_pos(per_sample_counts, base):
         ref_bases != base
     )
     if sum(is_shared_base):
-        sequence_ids = per_sample_counts[0].loc[is_shared_base]["chr"]
-        positions = per_sample_counts[0].loc[is_shared_base]["pos"]
+        sequence_ids = per_sample_counts[0].loc[is_shared_base, "chr"]
+        positions = per_sample_counts[0].loc[is_shared_base, "pos"]
         shared_base_pos = DataFrame(
             {"chr": sequence_ids, "pos": positions, "alt": base}
         )
