@@ -39,8 +39,7 @@ def filter_variants(extreme_depth, shared_alleles, variants):
         extreme_depth,
         delim_whitespace=True,
         chunksize=100000,
-        header=None,
-        names=["CHROM", "POS"],
+        dtype={"CHROM": str, "POS": float64}
     ):
         filtered_variants = df_subtract(filtered_variants, depth_chunk)
 
@@ -48,10 +47,11 @@ def filter_variants(extreme_depth, shared_alleles, variants):
         shared_alleles,
         delim_whitespace=True,
         chunksize=100000,
-        header=None,
-        names=["CHROM", "POS", "REF", "ALT"],
         dtype={"CHROM": str, "POS": float64, "REF": str, "ALT": str},
     ):
         filtered_variants = df_subtract(filtered_variants, shared_chunk)
     filtered_variants = filtered_variants[filtered_variants["ALT"] != "*"]
     filtered_variants.to_csv(sys.stdout, sep="\t", index=False)
+
+if __name__ == "__main__":
+    filter_variants()

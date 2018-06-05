@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Find variants which are unique to sample from mpileup2readcounts output."""
+from collections import OrderedDict
 import sys
 
 import click
@@ -77,12 +78,14 @@ def find_shared_indel_pos(per_sample_counts, indel_type):
                 alt = ref_bases[indel_column.index]
 
             shared_pos = DataFrame(
-                {
-                    "chr": sequence_ids.values,
-                    "pos": positions,
-                    "ref": ref,
-                    "alt": alt,
-                }
+                OrderedDict(
+                    {
+                        "chr": sequence_ids.values,
+                        "pos": positions,
+                        "ref": ref,
+                        "alt": alt,
+                    }
+                )
             )
             shared_indel_pos = shared_indel_pos.append(shared_pos)
     return shared_indel_pos
@@ -112,7 +115,14 @@ def find_shared_base_pos(per_sample_counts, base):
         sequence_ids = per_sample_counts[0].loc[is_shared_base, "chr"]
         positions = per_sample_counts[0].loc[is_shared_base, "pos"]
         shared_base_pos = DataFrame(
-            {"chr": sequence_ids, "pos": positions, "alt": base}
+            OrderedDict(
+                {
+                    "chr": sequence_ids,
+                    "pos": positions,
+                    "ref": ref_bases.loc[is_shared_base],
+                    "alt": base
+                }
+            )
         )
     else:
         shared_base_pos = DataFrame()
@@ -156,6 +166,7 @@ def find_shared_alleles(pileups):
         read_csv(f, sep="\t", chunksize=100000, dtype=READCOUNT_DTYPE)
         for f in pileups
     ]
+    sys.stdout.write("CHROM\tPOS\tREF\tALT")
     for chunks in zip(*readcount_iter):
         # Rename "loc" column so that it doesn't cause issues with loc indexing
         chunks = [chunk.rename(columns={"loc": "pos"}) for chunk in chunks]
