@@ -1,11 +1,12 @@
 """Megadaph SNP and small indel variant calling pipeline."""
 import os
+from shutil import move
 from uuid import uuid4
 
 from fmbiopy.iter import flatten
 from fmbiopy.io import read_header
 import numpy as np
-from pandas import read_csv
+from pandas import isnull, read_csv
 from plumbum import (
     FG,
     local,
@@ -194,11 +195,12 @@ rule all:
                genotype=GENOTYPE, iter=PLOT_ITER),
         expand("output/produce_covplots{iter}/{sample}.covsum.png",
                sample=SAMPLE, iter=PLOT_ITER),
-        'output/count_callable_loci/line_info.csv',
+        # 'output/count_callable_loci/line_info.csv',
         expand('output/plot_variant_quality_metrics/{sample}.svg',
                sample=SAMPLE),
-        expand('output/custom_filter_variants/{sample}.{vartype}.big.tsv',
+        expand('output/allele_freq_filter/{sample}.{vartype}.big.tsv',
                 sample=SAMPLE, vartype=VARIANT_TYPES)
+
 
 # ==============================================================================
 # Utility Rules
@@ -224,6 +226,15 @@ rule index_fasta:
         shell(' '.join(['samtools', 'faidx', input.fasta]))
         shell('picard CreateSequenceDictionary R=' + input.fasta +
               ' O=' + picard_dict)
+
+
+rule index_vcf:
+    input:
+        '{dir}/{name}.vcf'
+    output:
+        '{dir}/{name}.vcf.idx'
+    shell:
+        'igvtools index {input}'
 
 rule align_to_assembly:
     input:
@@ -845,6 +856,7 @@ rule genotype_gvcfs:
     input:
         unpack(match_final_assembly),
         gvcf = 'output/call_variants/{sample}.g.vcf',
+        idx = 'output/call_variants/{sample}.g.vcf.idx',
     output:
         'output/genotype_gvcfs/{sample}.vcf'
     params:
@@ -912,25 +924,71 @@ rule genotype_gvcfs:
 rule produce_pileup:
     input:
         unpack(match_final_assembly),
-        bam = 'output/local_realignment/{sample}.bam',
-        bai = 'output/local_realignment/{sample}.bam.bai',
-        intervals = lambda wildcards: (
-            ''.join(
-                ['output/repeatmasker/', wildcards.sample[0:2],
-                     'SC.inverted.bed'
-                ]
+        bam = lambda wildcards: (
+            expand(
+                'output/local_realignment/{sample}.bam',
+                sample=GENOTYPE_TO_SAMPLE[wildcards.genotype]
             )
-        )
+        ),
+        bai = lambda wildcards: (
+            expand(
+                'output/local_realignment/{sample}.bam.bai',
+                sample=GENOTYPE_TO_SAMPLE[wildcards.genotype]
+            )
+        ),
+        intervals = 'output/repeatmasker/{genotype}SC.inverted.bed'
 
     output:
-        'output/produce_pileup/{sample}.pileup'
+        'output/produce_pileup/{genotype}.done.txt'
     resources:
         mem_mb = 20000
-    shell:
-        'samtools mpileup -a -l {input.intervals} -f {input.assembly} '
-        '{input.bam} | '
-        'sed \'s/          /       *       */g\' | '
-        '{config[mpileup2readcounts]} 1 -5 false 0 0 >{output}'
+    run:
+        actual_outputs = [
+            "output/produce_pileup/" +
+            os.path.splitext(os.path.basename(f))[0] + ".tmp.pileup"
+            for f in input.bam
+        ]
+
+        tmp_output = ''.join(
+            ['output/produce_pileup/', wildcards.genotype, '.pileup']
+        )
+        # shell(
+        #     'samtools mpileup -aa -B -d 1000 -Q 0 -l {input.intervals} '
+        #     '-f {input.assembly} {input.bam} | '
+        #     'sed \'s/          /       *       */g\' | '
+        #     '{config[mpileup2readcounts]} 0 -5 false 0 0 >%s' % tmp_output
+        # )
+
+        # Split the merged output table into per sample tables.
+        col_range = (4, 14)
+        for i in range(len(input.bam)):
+            shell(
+                "cut -f 1-3,%d-%d %s >%s" %
+                (col_range[0], col_range[1], tmp_output, actual_outputs[i])
+            )
+            col_range = (col_range[0] + 11, col_range[1] + 11)
+        # os.remove(tmp_output)
+        shell("touch {output}")
+
+
+rule gather_pileups:
+    input:
+        expand('output/produce_pileup/{genotype}.done.txt', genotype=GENOTYPE)
+    output:
+        pileups = expand('output/produce_pileup/{sample}.pileup', sample=SAMPLE)
+    run:
+        tmp_outputs = [
+            "output/produce_pileup/" + sample + ".tmp.pileup"
+            for sample in SAMPLE
+        ]
+        for src, dest in zip(tmp_outputs, output.pileups):
+            move(src, dest)
+
+
+
+# ==============================================================================
+# Variant Filtering
+# ==============================================================================
 
 rule find_extreme_depth_sites:
     input:
@@ -1055,9 +1113,12 @@ rule find_shared_alleles:
 rule select_variants:
     input:
         unpack(match_final_assembly),
-        vcf = 'output/genotype_gvcfs/{sample}.vcf'
+        vcf = 'output/genotype_gvcfs/{sample}.vcf',
+        idx = 'output/genotype_gvcfs/{sample}.vcf.idx'
     output:
         'output/select_variants/{sample}.{vartype}.vcf'
+    resources:
+        mem_mb = 20000
     run:
         if wildcards.vartype == 'snps':
             criteria = '--selectTypeToInclude SNP'
@@ -1076,7 +1137,8 @@ rule select_variants:
 rule extract_variant_quality_metrics:
     input:
         unpack(match_final_assembly),
-        vcf = 'output/select_variants/{sample}.{vartype}.vcf'
+        vcf = 'output/select_variants/{sample}.{vartype}.vcf',
+        idx = 'output/select_variants/{sample}.{vartype}.vcf.idx'
     output:
         'output/extract_variant_quality_metrics/{sample}.{vartype}.q.tsv'
     shell:
@@ -1097,12 +1159,13 @@ rule plot_variant_quality_metrics:
         'output/plot_variant_quality_metrics/{sample}.svg'
     script:
         'scripts/plot_variant_quality_scores.R'
-
+#
 
 rule exclude_nonvariants:
     input:
         unpack(match_final_assembly),
         vcf = 'output/select_variants/{sample}.{vartype}.vcf',
+        idx = 'output/select_variants/{sample}.{vartype}.vcf.idx'
     output:
         vcf = 'output/exclude_nonvariants/{sample}.{vartype}.vcf'
     shell:
@@ -1114,10 +1177,11 @@ rule exclude_nonvariants:
 
 
 # Filter variants using GATK quality metrics
-rule filter_variants:
+rule gatk_filter_variants:
     input:
         unpack(match_final_assembly),
         vcf = 'output/exclude_nonvariants/{sample}.{vartype}.vcf',
+        idx = 'output/exclude_nonvariants/{sample}.{vartype}.vcf.idx'
     output:
         'output/gatk_filter_variants/{sample}.{vartype}.vcf'
     params:
@@ -1127,7 +1191,7 @@ rule filter_variants:
                 'QD': '< 2.0',
                 'FS': '> 60.0',
                 'MQ': '< 35.0',
-                'SOR': '> 4.0',
+                'SOR': '> 3.0',
                 'MQRankSum': '< -12.5',
                 'ReadPosRankSum': ['< -10.0', '> 10.0']
             }
@@ -1150,7 +1214,9 @@ rule filter_variants:
 rule calc_number_filtered_sites:
     input:
         pre = 'output/select_variants/{sample}.{vartype}.vcf',
-        post = 'output/gatk_filter_variants/{sample}.{vartype}.vcf'
+        pre_idx = 'output/select_variants/{sample}.{vartype}.vcf.idx',
+        post = 'output/gatk_filter_variants/{sample}.{vartype}.vcf',
+        post_idx = 'output/gatk_filter_variants/{sample}.{vartype}.vcf.idx'
     output:
         'output/calc_number_filtered_sites/{sample}.{vartype}.txt'
     shell:
@@ -1163,15 +1229,15 @@ rule remove_gatk_filtered_variants:
     input:
         unpack(match_final_assembly),
         vcf = 'output/gatk_filter_variants/{sample}.{vartype}.vcf',
+        idx = 'output/gatk_filter_variants/{sample}.{vartype}.vcf.idx',
     output:
-        'output/remove_gatk_filtered_variants/{sample}.{vartype}.vcf'
+        vcf = 'output/remove_gatk_filtered_variants/{sample}.{vartype}.vcf'
     shell:
         'java -jar {config[gatk3_jar]} -T SelectVariants '
         '-R {input.assembly} '
         '-V {input.vcf} '
-        '-o {output} '
-        '--excludeFiltered '
-        '--excludeNonVariants'
+        '-o {output.vcf} '
+        '--excludeFiltered'
 
 
 rule custom_filter_variants:
@@ -1192,13 +1258,70 @@ rule custom_filter_variants:
         'scripts/filter_variants.py '
         '--extreme-depth {input.extreme_depth} '
         '--shared-alleles {input.shared_alleles} '
-        '>{output}'
+        '{input.variants} >{output}'
 
+rule remove_shared_homo_variants:
+    input:
+        filtered = expand(
+            'output/custom_filter_variants/{sample}.{{vartype}}.big.tsv',
+            sample=SAMPLE),
+        unfiltered = expand(
+            'output/exclude_nonvariants/{sample}.{{vartype}}.big.tsv',
+            sample=SAMPLE)
+    output:
+        expand('output/remove_shared_homo_variants/{sample}.{{vartype}}.big.tsv',
+                sample=SAMPLE)
+    run:
+        # Remove all sites in each filtered sample which are also present in any
+        # unfiltered sample of the same genotype.
+        output_prefix = os.path.dirname(output[0]) + '/'
+        for genotype in GENOTYPE:
+            genotype_samples = GENOTYPE_TO_SAMPLE[genotype]
+            filtered_files = []
+            for f in input.filtered:
+                if any(substr in f for substr in genotype_samples):
+                    filtered_files.append(f)
+
+            for target in filtered_files:
+                comparisons = []
+                for f in input.unfiltered:
+                    if (any(substr in f for substr in genotype_samples) and
+                            local.path(target).name != local.path(f).name):
+                        comparisons.append(f)
+
+                shell('complement.py '
+                      '-o ' + output_prefix + ' '
+                      '--tab_separated '
+                      '-i 0,1,9 '
+                      '--target ' + target + ' ' +
+                      ' '.join([target] + comparisons))
+
+
+rule allele_freq_filter:
+    input:
+        variants = 'output/remove_shared_homo_variants/{sample}.{vartype}.big.tsv'
+    output:
+        variants = 'output/allele_freq_filter/{sample}.{vartype}.big.tsv'
+    params:
+        min_af = 0.2,
+        min_depth = 15
+    run:
+        df = read_csv(input.variants, sep="\t")
+        AD_col = [col for col in df.columns if 'AD' in col][0]
+        allele_counts = df[AD_col].str.split(',', expand=True).fillna(0).astype(int)
+        allele_counts.values.sort()
+        mut_counts = allele_counts[allele_counts.columns[-2]]
+        wt_counts = allele_counts[allele_counts.columns[-1]]
+        depth = mut_counts + wt_counts
+        af = mut_counts / depth
+        filtered_df = df[(af >= 0.2) & (depth > 19)]
+        filtered_df.to_csv(output.variants, index=False, sep="\t")
 
 rule vcf_to_small_tsv:
     input:
         unpack(match_final_assembly),
-        vcf = 'output/{dir}/{sample}.vcf'
+        vcf = 'output/{dir}/{sample}.vcf',
+        idx = 'output/{dir}/{sample}.vcf.idx',
     output:
         'output/{dir}/{sample}.small.tsv'
     resources:
@@ -1213,7 +1336,8 @@ rule vcf_to_small_tsv:
 rule vcf_to_tsv:
     input:
         unpack(match_final_assembly),
-        vcf = 'output/{dir}/{sample}.vcf'
+        vcf = 'output/{dir}/{sample}.vcf',
+        idx = 'output/{dir}/{sample}.vcf.idx'
     output:
         'output/{dir}/{sample}.big.tsv'
     shell:
