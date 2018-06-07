@@ -1,6 +1,6 @@
 """Megadaph SNP and small indel variant calling pipeline."""
 import os
-from shutil import move
+from shutil import copy, move
 from uuid import uuid4
 
 from fmbiopy.iter import flatten
@@ -53,7 +53,7 @@ DECONTAM_ITER = ['1', '2', '_reduced']
 # Iterations of De Novo assembly with spades
 ASSEMBLY_ITER = ['1', '2', '3']
 
-VARIANT_TYPES = ['snps', 'indels', 'other']
+VARIANT_TYPES = ['snps', 'indels']
 
 # Suffixes for various types of fasta indices
 FASTA_INDICES = {
@@ -952,12 +952,12 @@ rule produce_pileup:
         tmp_output = ''.join(
             ['output/produce_pileup/', wildcards.genotype, '.pileup']
         )
-        # shell(
-        #     'samtools mpileup -aa -B -d 1000 -Q 0 -l {input.intervals} '
-        #     '-f {input.assembly} {input.bam} | '
-        #     'sed \'s/          /       *       */g\' | '
-        #     '{config[mpileup2readcounts]} 0 -5 false 0 0 >%s' % tmp_output
-        # )
+        shell(
+            'samtools mpileup -aa -B -d 1000 -Q 0 -l {input.intervals} '
+            '-f {input.assembly} {input.bam} | '
+            'sed \'s/          /       *       */g\' | '
+            '{config[mpileup2readcounts]} 0 -5 false 0 0 >%s' % tmp_output
+        )
 
         # Split the merged output table into per sample tables.
         col_range = (4, 14)
@@ -967,7 +967,7 @@ rule produce_pileup:
                 (col_range[0], col_range[1], tmp_output, actual_outputs[i])
             )
             col_range = (col_range[0] + 11, col_range[1] + 11)
-        # os.remove(tmp_output)
+        os.remove(tmp_output)
         shell("touch {output}")
 
 
@@ -989,7 +989,6 @@ rule gather_pileups:
 # ==============================================================================
 # Variant Filtering
 # ==============================================================================
-
 rule find_extreme_depth_sites:
     input:
         lambda wildcards: (
@@ -1134,6 +1133,7 @@ rule select_variants:
               '-o {output} ' +
               criteria)
 
+
 rule extract_variant_quality_metrics:
     input:
         unpack(match_final_assembly),
@@ -1176,6 +1176,7 @@ rule exclude_nonvariants:
         '-o {output.vcf}'
 
 
+
 # Filter variants using GATK quality metrics
 rule gatk_filter_variants:
     input:
@@ -1211,25 +1212,61 @@ rule gatk_filter_variants:
               '--filterName {wildcards.vartype}_filter '
               '--filterExpression ' + filter_expression)
 
-rule calc_number_filtered_sites:
+rule filter_shared_indels:
     input:
-        pre = 'output/select_variants/{sample}.{vartype}.vcf',
-        pre_idx = 'output/select_variants/{sample}.{vartype}.vcf.idx',
-        post = 'output/gatk_filter_variants/{sample}.{vartype}.vcf',
-        post_idx = 'output/gatk_filter_variants/{sample}.{vartype}.vcf.idx'
+        variants = expand(
+            "output/gatk_filter_variants/{sample}.{vartype}.big.tsv",
+            sample=SAMPLE, vartype=VARIANT_TYPES
+        )
     output:
-        'output/calc_number_filtered_sites/{sample}.{vartype}.txt'
-    shell:
-        'echo "Sites prefilter: " >> {output}; '
-        'grep -vc "^#" {input.pre} >>  {output}; '
-        'echo "\nSites postfilter: " >> {output}; '
-        'grep -vc "^#" {input.post} >> {output}'
+        expand(
+            "output/filter_shared_indels/{sample}.{vartype}.big.tsv",
+            sample=SAMPLE, vartype=VARIANT_TYPES
+        )
+    params:
+        base_range = 5
+    run:
+        indir = "output/gatk_filter_variants"
+        outdir = "output/filter_shared_indels"
+
+        # First just copy the SNP files to the output locations since we won't
+        # be filtering them
+        snp_files = [x for x in input.variants if 'snps' in x]
+        for snp_file in snp_files:
+            output_snpfile = os.path.join(outdir, os.path.basename(snp_file))
+            copy(snp_file, output_snpfile)
+
+        # Filter indels
+        for genotype in GENOTYPE:
+            genotype_indel_files = [
+                os.path.join(indir, sample + ".indels.big.tsv")
+                for sample in GENOTYPE_TO_SAMPLE[genotype]
+            ]
+            for i in range(len(genotype_indel_files)):
+                target_indels = genotype_indel_files[i]
+                filtered_output = os.path.join(
+                    outdir, os.path.basename(target_indels)
+                )
+                other_indels = [
+                    f for f in genotype_indel_files if f != target_indels
+                ]
+                shell(
+                    "scripts/filter_shared_indels.py "
+                    "--target %s "
+                    "--nbases {params.base_range} "
+                    "%s >%s" %
+                    (target_indels, ' '.join(other_indels), filtered_output)
+                )
+
+
+
+
 
 rule remove_gatk_filtered_variants:
     input:
         unpack(match_final_assembly),
-        vcf = 'output/gatk_filter_variants/{sample}.{vartype}.vcf',
-        idx = 'output/gatk_filter_variants/{sample}.{vartype}.vcf.idx',
+        vcf = 'output/filter_shared_indels/{sample}.{vartype}.vcf',
+        idx = 'output/filter_shared_indels/{sample}.{vartype}.vcf.idx',
     output:
         vcf = 'output/remove_gatk_filtered_variants/{sample}.{vartype}.vcf'
     shell:
