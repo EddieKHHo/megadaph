@@ -108,8 +108,9 @@ def find_shared_base_pos(per_sample_counts, base):
 
     """
     ref_bases = per_sample_counts[0]["ref"]
+
     is_shared_base = find_shared_bases(per_sample_counts, base) & (
-        ref_bases != base
+        base != ref_bases.values
     )
     if sum(is_shared_base):
         sequence_ids = per_sample_counts[0].loc[is_shared_base, "chr"]
@@ -166,10 +167,15 @@ def find_shared_alleles(pileups):
         read_csv(f, sep="\t", chunksize=100000, dtype=READCOUNT_DTYPE)
         for f in pileups
     ]
-    sys.stdout.write("CHROM\tPOS\tREF\tALT")
+    sys.stdout.write("CHROM\tPOS\tREF\tALT\n")
     for chunks in zip(*readcount_iter):
         # Rename "loc" column so that it doesn't cause issues with loc indexing
         chunks = [chunk.rename(columns={"loc": "pos"}) for chunk in chunks]
+        # Check that the pileups are properly aligned
+        assert all(
+            [chunks[0]["pos"].iloc[0] == chunk["pos"].iloc[0] for chunk in chunks]
+        )
+
         shared_allele_pos = find_shared_allele_pos(chunks)
         if shared_allele_pos.shape[0] > 0:
             shared_allele_pos.to_string(sys.stdout, header=False, index=False)

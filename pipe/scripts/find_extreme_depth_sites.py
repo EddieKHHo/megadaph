@@ -38,7 +38,7 @@ def find_extreme_depth_sites(max_depth, min_depth, pileups):
         read_csv(f, sep="\t", chunksize=100000, dtype=READCOUNT_DTYPE)
         for f in pileups
     ]
-    sys.stdout.write("CHROM\tPOS")
+    sys.stdout.write("CHROM\tPOS\n")
     for chunks in zip(*readcount_iter):
         chunks = [chunk.rename(columns={'loc': 'pos'}) for chunk in chunks]
         extreme_depth_sites = find_extreme_depth(chunks, min_depth, max_depth)
