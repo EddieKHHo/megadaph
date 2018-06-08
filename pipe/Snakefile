@@ -1,12 +1,11 @@
 """Megadaph SNP and small indel variant calling pipeline."""
 import os
-from shutil import move
+from shutil import copy, move
 from uuid import uuid4
 
 from fmbiopy.iter import flatten
-from fmbiopy.io import read_header
 import numpy as np
-from pandas import isnull, read_csv
+from pandas import read_csv
 from plumbum import (
     FG,
     local,
@@ -17,6 +16,7 @@ from plumbum.cmd import (
     calc_bed_length,
     calc_fasta_length,
     cat,
+    wc,
 )
 import scipy.stats as st
 
@@ -53,7 +53,7 @@ DECONTAM_ITER = ['1', '2', '_reduced']
 # Iterations of De Novo assembly with spades
 ASSEMBLY_ITER = ['1', '2', '3']
 
-VARIANT_TYPES = ['snps', 'indels', 'other']
+VARIANT_TYPES = ['snps', 'indels']
 
 # Suffixes for various types of fasta indices
 FASTA_INDICES = {
@@ -184,6 +184,11 @@ def clear_directory(dir):
     dir.delete()
     dir.mkdir()
 
+
+def count_lines(a_file):
+    return int(wc("-l", a_file).rstrip().split()[0])
+
+
 # ==============================================================================
 # Pipeline Outputs
 # ==============================================================================
@@ -195,7 +200,7 @@ rule all:
                genotype=GENOTYPE, iter=PLOT_ITER),
         expand("output/produce_covplots{iter}/{sample}.covsum.png",
                sample=SAMPLE, iter=PLOT_ITER),
-        # 'output/count_callable_loci/line_info.csv',
+        'output/count_callable_loci/line_info.csv',
         expand('output/plot_variant_quality_metrics/{sample}.svg',
                sample=SAMPLE),
         expand('output/allele_freq_filter/{sample}.{vartype}.big.tsv',
@@ -953,12 +958,12 @@ rule produce_pileup:
         tmp_output = ''.join(
             ['output/produce_pileup/', wildcards.genotype, '.pileup']
         )
-        # shell(
-        #     'samtools mpileup -aa -B -d 1000 -Q 0 -l {input.intervals} '
-        #     '-f {input.assembly} {input.bam} | '
-        #     'sed \'s/          /       *       */g\' | '
-        #     '{config[mpileup2readcounts]} 0 -5 false 0 0 >%s' % tmp_output
-        # )
+        shell(
+            'samtools mpileup -aa -B -d 1000 -Q 0 -l {input.intervals} '
+            '-f {input.assembly} {input.bam} | '
+            'sed \'s/          /       *       */g\' | '
+            '{config[mpileup2readcounts]} 0 -5 false 0 0 >%s' % tmp_output
+        )
 
         # Split the merged output table into per sample tables.
         col_range = (4, 14)
@@ -968,7 +973,7 @@ rule produce_pileup:
                 (col_range[0], col_range[1], tmp_output, actual_outputs[i])
             )
             col_range = (col_range[0] + 11, col_range[1] + 11)
-        # os.remove(tmp_output)
+        os.remove(tmp_output)
         shell("touch {output}")
 
 
@@ -990,7 +995,6 @@ rule gather_pileups:
 # ==============================================================================
 # Variant Filtering
 # ==============================================================================
-
 rule find_extreme_depth_sites:
     input:
         lambda wildcards: (
@@ -1028,33 +1032,27 @@ rule find_shared_alleles:
 
 # Count the total number of callable sites for each sample and add the
 # information to the line info metadata.
-# rule count_callable_loci:
-#     input:
-#         assembly = expand('output/filter_zero_coverage/{genotype}SC.fasta',
-#                 genotype=GENOTYPE),
-#         depth_filtered = expand('output/depth_filter_variants/{genotype}.txt',
-#                 genotype=GENOTYPE),
-#         masked = expand('output/repeatmasker/{genotype}SC.bed',
-#                 genotype=GENOTYPE)
-#     output:
-#         line_info = 'output/count_callable_loci/line_info.csv'
-#     run:
-#         line_info = read_csv(config['line_info'])
-#         line_info['bases_surveyed'] = np.nan
-#         input_sources = zip(
-#                 input.assembly,
-#                 input.masked,
-#                 input.depth_filtered,
-#                 GENOTYPE)
-#         for assembly, masked, depth_filtered, genotype in input_sources:
-#             num_masked = int(calc_bed_length(masked).rstrip())
-#             with open(depth_filtered, 'r') as inp:
-#                 num_depth_filtered = int(inp.read().rstrip())
-#             assembly_length = int(calc_fasta_length(assembly).rstrip())
-#             num_callable = assembly_length - num_depth_filtered - num_masked
-#             genotype_idx = [x.startswith(genotype) for x in line_info['sample']]
-#             line_info.loc[genotype_idx, 'bases_surveyed'] = num_callable
-#         line_info.to_csv(output.line_info, index=False)
+rule count_callable_loci:
+    input:
+        pileup = expand(
+            "output/produce_pileup/{sample}.pileup", sample=SAMPLE
+        ),
+        extreme_depth = expand(
+            "output/find_extreme_depth_sites/{genotype}.tsv", genotype=GENOTYPE
+        )
+    output:
+        line_info = 'output/count_callable_loci/line_info.csv'
+    run:
+        line_info = read_csv(config['line_info'])
+        line_info['bases_surveyed'] = np.nan
+
+        for sample in SAMPLE:
+            pileup = "output/produce_pileup/%s.pileup" % sample
+            extreme_depth = "output/find_extreme_depth_sites/%s.tsv" % sample[0:2]
+            num_callable_loci = count_lines(pileup) - count_lines(extreme_depth)
+            genotype_idx = [x.startswith(genotype) for x in line_info['sample']]
+            line_info.loc[genotype_idx, 'bases_surveyed'] = num_callable_loci
+        line_info.to_csv(output.line_info, index=False)
 
 
 # Filter out variants which are present in multiple samples
@@ -1135,6 +1133,7 @@ rule select_variants:
               '-o {output} ' +
               criteria)
 
+
 rule extract_variant_quality_metrics:
     input:
         unpack(match_final_assembly),
@@ -1177,6 +1176,7 @@ rule exclude_nonvariants:
         '-o {output.vcf}'
 
 
+
 # Filter variants using GATK quality metrics
 rule gatk_filter_variants:
     input:
@@ -1212,25 +1212,61 @@ rule gatk_filter_variants:
               '--filterName {wildcards.vartype}_filter '
               '--filterExpression ' + filter_expression)
 
-rule calc_number_filtered_sites:
+rule filter_shared_indels:
     input:
-        pre = 'output/select_variants/{sample}.{vartype}.vcf',
-        pre_idx = 'output/select_variants/{sample}.{vartype}.vcf.idx',
-        post = 'output/gatk_filter_variants/{sample}.{vartype}.vcf',
-        post_idx = 'output/gatk_filter_variants/{sample}.{vartype}.vcf.idx'
+        variants = expand(
+            "output/gatk_filter_variants/{sample}.{vartype}.big.tsv",
+            sample=SAMPLE, vartype=VARIANT_TYPES
+        )
     output:
-        'output/calc_number_filtered_sites/{sample}.{vartype}.txt'
-    shell:
-        'echo "Sites prefilter: " >> {output}; '
-        'grep -vc "^#" {input.pre} >>  {output}; '
-        'echo "\nSites postfilter: " >> {output}; '
-        'grep -vc "^#" {input.post} >> {output}'
+        expand(
+            "output/filter_shared_indels/{sample}.{vartype}.big.tsv",
+            sample=SAMPLE, vartype=VARIANT_TYPES
+        )
+    params:
+        base_range = 5
+    run:
+        indir = "output/gatk_filter_variants"
+        outdir = "output/filter_shared_indels"
+
+        # First just copy the SNP files to the output locations since we won't
+        # be filtering them
+        snp_files = [x for x in input.variants if 'snps' in x]
+        for snp_file in snp_files:
+            output_snpfile = os.path.join(outdir, os.path.basename(snp_file))
+            copy(snp_file, output_snpfile)
+
+        # Filter indels
+        for genotype in GENOTYPE:
+            genotype_indel_files = [
+                os.path.join(indir, sample + ".indels.big.tsv")
+                for sample in GENOTYPE_TO_SAMPLE[genotype]
+            ]
+            for i in range(len(genotype_indel_files)):
+                target_indels = genotype_indel_files[i]
+                filtered_output = os.path.join(
+                    outdir, os.path.basename(target_indels)
+                )
+                other_indels = [
+                    f for f in genotype_indel_files if f != target_indels
+                ]
+                shell(
+                    "scripts/filter_shared_indels.py "
+                    "--target %s "
+                    "--nbases {params.base_range} "
+                    "%s >%s" %
+                    (target_indels, ' '.join(other_indels), filtered_output)
+                )
+
+
+
+
 
 rule remove_gatk_filtered_variants:
     input:
         unpack(match_final_assembly),
-        vcf = 'output/gatk_filter_variants/{sample}.{vartype}.vcf',
-        idx = 'output/gatk_filter_variants/{sample}.{vartype}.vcf.idx',
+        vcf = 'output/filter_shared_indels/{sample}.{vartype}.vcf',
+        idx = 'output/filter_shared_indels/{sample}.{vartype}.vcf.idx',
     output:
         vcf = 'output/remove_gatk_filtered_variants/{sample}.{vartype}.vcf'
     shell:

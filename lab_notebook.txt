@@ -989,3 +989,25 @@ June 1st, 2018
 ===============================================================================
 - Uniqueness filter and depth filter have been reimplemented to work on
   readcount files.
+
+===============================================================================
+June 5th, 2018
+===============================================================================
+- Uniqueness + depth filter required a couple more days of bug fixing to get
+  working completely. The final variant sets are looking to be almost there. The
+  strand bias filter does not seem to be working very effectively, so I'll need
+  to increase its stringency, I'll try filtering SOR>3.0.
+- While examining variants in IGV I also noticed that there are cases where IGV
+  shows evidence for an allele across multiple samples, but the readcount files
+  show it in only one sample. I'll try to remove any prefiltering by samtools to
+  see if I can rescue them. Hoping that it isn't a bug in mpileup2readcounts.
+
+===============================================================================
+June 6th, 2018
+===============================================================================
+- It turns out that the errors I've been running into are due to missing values
+  in samtools mpileup which cause the readcount tables to fail to align
+  correctly. I rewrote the produce_pileup step so that all samples from each
+  genotype are called  together. This produces a merged table which then has to
+  be split into per-sample readcounts. Unfortunately this will probably be
+  significantly slower to execute.
