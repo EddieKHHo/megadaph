@@ -858,7 +858,8 @@ rule genotype_gvcfs:
         gvcf = 'output/call_variants/{sample}.g.vcf',
         idx = 'output/call_variants/{sample}.g.vcf.idx',
     output:
-        'output/genotype_gvcfs/{sample}.vcf'
+        'output/genotype_gvcfs/{sample}.vcf',
+        'output/genotype_gvcfs/{sample}.vcf.idx'
     params:
         snp_heterozygosity = 0.015,
         indel_heterozygosity = 0.01
