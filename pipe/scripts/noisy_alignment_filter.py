@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Filter structural variants in which the alignments are noisy in other
-samples.
-
-This is to remove structural variants which are only called in one sample,
-but are evidenced by misalignments in other samples.
-"""
+"""Filter variants adjacent to indels in other samples."""
 import sys
 
 import click
@@ -23,7 +18,7 @@ def other_samples_noisy(indel_row, base_range, other_indels):
     return False
 
 
-def filter_shared_svs(target_indels, base_range, other_indels):
+def filter_noisy_regions(target_indels, base_range, other_indels):
     sv_is_shared = target_indels.apply(
         other_samples_noisy,
         axis=1,
@@ -36,14 +31,13 @@ def filter_shared_svs(target_indels, base_range, other_indels):
 @click.command()
 @click.option(
     "--target",
-    help="Target tsv file containing structural variants to be filtered.",
+    help="Target tsv file containing variants to be filtered.",
 )
 @click.option(
     "--nbases",
     type=int,
     help=(
-        "Number of bases surrounding structural variants to check in "
-        "other samples."
+        "Number of bases surrounding variant to check in other samples."
     ),
 )
 @click.argument("other_sample_indels", nargs=-1)
@@ -58,7 +52,7 @@ def cli(target, nbases, other_sample_indels):
         read_csv(f, sep="\t") for f in other_sample_indels
     ]
     target_indels_table = read_csv(target, sep="\t")
-    filtered_svs = filter_shared_svs(
+    filtered_svs = filter_noisy_regions(
         target_indels_table, nbases, other_sample_indel_tables
     )
     filtered_svs.to_csv(sys.stdout, sep="\t", index=False)
