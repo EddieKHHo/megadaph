@@ -49,12 +49,17 @@ def filter_variants(extreme_depth, shared_alleles, variants):
         chunksize=100000,
         dtype={"CHROM": str, "POS": float64, "REF": str, "ALT": str},
     ):
-        indels = shared_chunk[[shared_chunk["ALT"] == "NA"]]
-        snvs = shared_chunk[[shared_chunk["ALT"] != "NA"]]
-        filtered_variants = df_subtract(filtered_variants, snvs)
-        filtered_variants = df_subtract(
-            filtered_variants, indels[["CHROM", "POS"]]
-        )
+        if "snps" in variants:
+            snps = shared_chunk[[shared_chunk["ALT"] != "NA"]]
+            filtered_variants = df_subtract(filtered_variants, snps)
+        else if "indels" in variants:
+            indels = shared_chunk[[shared_chunk["ALT"] == "NA"]]
+            for i in range(-5, 5):
+                indels_copy = indels.copy()
+                indels_copy["POS"] = indels_copy["POS"] + i
+                filtered_variants = df_subtract(
+                    filtered_variants, indels_copy[["CHROM", "POS"]]
+                )
 
     filtered_variants = filtered_variants[filtered_variants["ALT"] != "*"]
     filtered_variants.to_csv(sys.stdout, sep="\t", index=False)
