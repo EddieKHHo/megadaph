@@ -863,11 +863,12 @@ rule genotype_gvcfs:
         gvcf = 'output/call_variants/{sample}.g.vcf',
         idx = 'output/call_variants/{sample}.g.vcf.idx',
     output:
-        'output/genotype_gvcfs/{sample}.vcf',
-        'output/genotype_gvcfs/{sample}.vcf.idx'
+        'output/genotype_gvcfs/{sample}.vcf'
     params:
         snp_heterozygosity = 0.015,
         indel_heterozygosity = 0.01
+    resources:
+        mem_mb = 20000
     shell:
         'java -jar {config[gatk3_jar]} -T GenotypeGVCFs '
         '-R {input.assembly} '
@@ -876,7 +877,7 @@ rule genotype_gvcfs:
         '--includeNonVariantSites '
         '--heterozygosity {params.snp_heterozygosity} '
         '--indel_heterozygosity {params.indel_heterozygosity} '
-#
+
 # rule combine_gvcfs:
 #     input:
 #         unpack(match_final_assembly),
@@ -989,7 +990,6 @@ rule gather_pileups:
         ]
         for src, dest in zip(tmp_outputs, output.pileups):
             move(src, dest)
-
 
 
 # ==============================================================================
@@ -1159,7 +1159,7 @@ rule plot_variant_quality_metrics:
         'output/plot_variant_quality_metrics/{sample}.svg'
     script:
         'scripts/plot_variant_quality_scores.R'
-#
+
 
 rule exclude_nonvariants:
     input:
@@ -1174,7 +1174,6 @@ rule exclude_nonvariants:
         '-V {input.vcf} '
         '--excludeNonVariants '
         '-o {output.vcf}'
-
 
 
 # Filter variants using GATK quality metrics
@@ -1214,7 +1213,11 @@ rule gatk_filter_variants:
 
 rule filter_shared_indels:
     input:
-        variants = expand(
+        initial = expand(
+            "output/exclude_nonvariants/{sample}.{vartype}.big.tsv",
+            sample=SAMPLE, vartype=VARIANT_TYPES
+        ),
+        filtered = expand(
             "output/gatk_filter_variants/{sample}.{vartype}.big.tsv",
             sample=SAMPLE, vartype=VARIANT_TYPES
         )
@@ -1226,61 +1229,57 @@ rule filter_shared_indels:
     params:
         base_range = 5
     run:
-        indir = "output/gatk_filter_variants"
+        filtered_indir = "output/gatk_filter_variants"
+        unfiltered_indir = "output/exclude_nonvariants"
         outdir = "output/filter_shared_indels"
 
         # First just copy the SNP files to the output locations since we won't
         # be filtering them
-        snp_files = [x for x in input.variants if 'snps' in x]
+        snp_files = [x for x in input.filtered if 'snps' in x]
         for snp_file in snp_files:
             output_snpfile = os.path.join(outdir, os.path.basename(snp_file))
             copy(snp_file, output_snpfile)
 
         # Filter indels
         for genotype in GENOTYPE:
-            genotype_indel_files = [
-                os.path.join(indir, sample + ".indels.big.tsv")
+            genotype_filtered_indels = [
+                os.path.join(filtered_indir, sample + ".indels.big.tsv")
                 for sample in GENOTYPE_TO_SAMPLE[genotype]
             ]
-            for i in range(len(genotype_indel_files)):
-                target_indels = genotype_indel_files[i]
+            genotype_filtered_snps = [
+                os.path.join(filtered_indir, sample + ".snps.big.tsv")
+                for sample in GENOTYPE_TO_SAMPLE[genotype]
+            ]
+            genotype_filtered_files = (
+                    genotype_filtered_indels + genotype_filtered_snps
+            )
+            genotype_unfiltered_files = [
+                os.path.join(unfiltered_indir, sample + ".indels.big.tsv")
+                for sample in GENOTYPE_TO_SAMPLE[genotype]
+            ]
+            for i in range(len(genotype_filtered_files)):
+                target_variants = genotype_filtered_files[i]
                 filtered_output = os.path.join(
                     outdir, os.path.basename(target_indels)
                 )
                 other_indels = [
-                    f for f in genotype_indel_files if f != target_indels
+                    f for f in genotype_unfiltered_files
+                    if os.path.basename(f) != os.path.basename(target_indels)
                 ]
                 shell(
-                    "scripts/filter_shared_indels.py "
+                    "scripts/noisy_alignment_filter.py "
                     "--target %s "
                     "--nbases {params.base_range} "
                     "%s >%s" %
-                    (target_indels, ' '.join(other_indels), filtered_output)
+                    (target_variants, ' '.join(other_indels), filtered_output)
                 )
 
-
-
-
-
-rule remove_gatk_filtered_variants:
-    input:
-        unpack(match_final_assembly),
-        vcf = 'output/filter_shared_indels/{sample}.{vartype}.vcf',
-        idx = 'output/filter_shared_indels/{sample}.{vartype}.vcf.idx',
-    output:
-        vcf = 'output/remove_gatk_filtered_variants/{sample}.{vartype}.vcf'
-    shell:
-        'java -jar {config[gatk3_jar]} -T SelectVariants '
-        '-R {input.assembly} '
-        '-V {input.vcf} '
-        '-o {output.vcf} '
-        '--excludeFiltered'
 
 
 rule custom_filter_variants:
     input:
         variants = (
-            'output/remove_gatk_filtered_variants/{sample}.{vartype}.big.tsv'
+            'output/filter_shared_indels/{sample}.{vartype}.big.tsv'
         ),
         shared_alleles = lambda wildcards: (
             'output/find_shared_alleles/' + get_genotype(wildcards) + '.tsv'
