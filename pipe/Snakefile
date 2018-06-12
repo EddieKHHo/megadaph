@@ -1233,13 +1233,6 @@ rule noisy_alignment_filter:
         unfiltered_indir = "output/exclude_nonvariants"
         outdir = "output/noisy_alignment_filter"
 
-        # First just copy the SNP files to the output locations since we won't
-        # be filtering them
-        snp_files = [x for x in input.filtered if 'snps' in x]
-        for snp_file in snp_files:
-            output_snpfile = os.path.join(outdir, os.path.basename(snp_file))
-            copy(snp_file, output_snpfile)
-
         # Filter indels
         for genotype in GENOTYPE:
             genotype_filtered_indels = [
@@ -1260,11 +1253,12 @@ rule noisy_alignment_filter:
             for i in range(len(genotype_filtered_files)):
                 target_variants = genotype_filtered_files[i]
                 filtered_output = os.path.join(
-                    outdir, os.path.basename(target_indels)
+                    outdir, os.path.basename(target_variants)
                 )
+                target_sample = os.path.basename(target_variants).split(".")[0]
                 other_indels = [
                     f for f in genotype_unfiltered_files
-                    if os.path.basename(f) != os.path.basename(target_indels)
+                    if target_sample not in os.path.basename(f)
                 ]
                 shell(
                     "scripts/noisy_alignment_filter.py "
@@ -1273,7 +1267,6 @@ rule noisy_alignment_filter:
                     "%s >%s" %
                     (target_variants, ' '.join(other_indels), filtered_output)
                 )
-
 
 
 rule custom_filter_variants:
