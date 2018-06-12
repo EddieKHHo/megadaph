@@ -19,7 +19,7 @@ Options:
 from __future__ import print_function
 import sys
 
-from plumbum import BG, FG, local
+from plumbum import BG, local
 from plumbum.cmd import bowtie2, samtools
 
 
@@ -37,7 +37,7 @@ def _get_reference(args):
 
 
 def align_and_sort(args):
-    """Main function"""
+    """Main function."""
     ref = _get_reference(args)
     fai_indices = local.path(ref + ".fai")
     if not fai_indices:
