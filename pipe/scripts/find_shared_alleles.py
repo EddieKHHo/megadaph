@@ -34,63 +34,6 @@ def expand_list_column(column):
     return expanded
 
 
-def find_shared_indel_pos(per_sample_counts, indel_type):
-    """Find indel positions which are shared between samples.
-
-    Parameters
-    ----------
-    per_sample_counts: List[DataFrame]
-        List of unstranded count tables. One for each sample.
-    indel_type: str
-        One of ["Insertion", "Deletion"]
-
-    Returns
-    -------
-    DataFrame
-        DataFrame with 3 columns: ["chr", "pos", "alt"]. If multiple shared
-        shared indels are found at a site, multiple rows will be returned.
-
-    """
-    shared_indel_pos = DataFrame()
-    ref_bases = per_sample_counts[0]["ref"]
-    # Build a dataframe of shared indels with row indices from
-    # `per_sample_counts`. If multiple shared indels are present at a position,
-    # split them across multiple columns.
-    shared_indels = (
-        find_shared_indels(per_sample_counts, indel_type)
-        .pipe(prepend_ref_base, ref_bases)
-        .pipe(expand_list_column)
-    )
-    if nrow(shared_indels) > 0:
-        # Loop through indel columns, appending each to table of discovered
-        # positions
-        for column_index in shared_indels:
-            indel_column = shared_indels[column_index].dropna()
-            sequence_ids = per_sample_counts[0].loc[indel_column.index, "chr"]
-            positions = per_sample_counts[0].loc[indel_column.index, "pos"]
-
-            if indel_type == "Insertion":
-                ref = ref_bases[indel_column.index]
-                alt = indel_column
-            elif indel_type == "Deletion":
-                # Deleted bases are added to the ref column in vcf files.
-                ref = indel_column
-                alt = ref_bases[indel_column.index]
-
-            shared_pos = DataFrame(
-                OrderedDict(
-                    {
-                        "chr": sequence_ids.values,
-                        "pos": positions,
-                        "ref": ref,
-                        "alt": alt,
-                    }
-                )
-            )
-            shared_indel_pos = shared_indel_pos.append(shared_pos)
-    return shared_indel_pos
-
-
 def find_shared_base_pos(per_sample_counts, base):
     """Find alternative bases which are shared across samples.
 
@@ -121,7 +64,7 @@ def find_shared_base_pos(per_sample_counts, base):
                     "chr": sequence_ids,
                     "pos": positions,
                     "ref": ref_bases.loc[is_shared_base],
-                    "alt": base
+                    "alt": base,
                 }
             )
         )
@@ -152,11 +95,12 @@ def find_shared_allele_pos(per_sample_counts):
         shared_alleles = shared_alleles.append(
             shared_base_pos, ignore_index=True, sort=False
         )
-    for indel in ["Insertion", "Deletion"]:
-        shared_indel_pos = find_shared_indel_pos(per_sample_counts, indel)
-        shared_alleles = shared_alleles.append(
-            shared_indel_pos, ignore_index=True, sort=False
-        )
+    shared_indel_pos = find_shared_indels(per_sample_counts)
+    shared_indel_pos["alt"] = "NA"
+    shared_indel_pos["ref"] = "NA"
+    shared_alleles = shared_alleles.append(
+        shared_indel_pos, ignore_index=True, sort=False
+    )
     return shared_alleles
 
 
@@ -173,7 +117,10 @@ def find_shared_alleles(pileups):
         chunks = [chunk.rename(columns={"loc": "pos"}) for chunk in chunks]
         # Check that the pileups are properly aligned
         assert all(
-            [chunks[0]["pos"].iloc[0] == chunk["pos"].iloc[0] for chunk in chunks]
+            [
+                chunks[0]["pos"].iloc[0] == chunk["pos"].iloc[0]
+                for chunk in chunks
+            ]
         )
 
         shared_allele_pos = find_shared_allele_pos(chunks)
