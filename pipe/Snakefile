@@ -1211,7 +1211,7 @@ rule gatk_filter_variants:
               '--filterName {wildcards.vartype}_filter '
               '--filterExpression ' + filter_expression)
 
-rule filter_shared_indels:
+rule noisy_alignment_filter:
     input:
         initial = expand(
             "output/exclude_nonvariants/{sample}.{vartype}.big.tsv",
@@ -1223,7 +1223,7 @@ rule filter_shared_indels:
         )
     output:
         expand(
-            "output/filter_shared_indels/{sample}.{vartype}.big.tsv",
+            "output/noisy_alignment_filter/{sample}.{vartype}.big.tsv",
             sample=SAMPLE, vartype=VARIANT_TYPES
         )
     params:
@@ -1231,7 +1231,7 @@ rule filter_shared_indels:
     run:
         filtered_indir = "output/gatk_filter_variants"
         unfiltered_indir = "output/exclude_nonvariants"
-        outdir = "output/filter_shared_indels"
+        outdir = "output/noisy_alignment_filter"
 
         # First just copy the SNP files to the output locations since we won't
         # be filtering them
@@ -1279,7 +1279,7 @@ rule filter_shared_indels:
 rule custom_filter_variants:
     input:
         variants = (
-            'output/filter_shared_indels/{sample}.{vartype}.big.tsv'
+            'output/noisy_alignment_filter/{sample}.{vartype}.big.tsv'
         ),
         shared_alleles = lambda wildcards: (
             'output/find_shared_alleles/' + get_genotype(wildcards) + '.tsv'
