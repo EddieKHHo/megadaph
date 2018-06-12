@@ -9,7 +9,7 @@ from pandas import read_csv
 
 def filter_noisy_regions(target_variants, base_range, other_indels):
     for indel_table in other_indels:
-        for i in range(-5, 5):
+        for i in range(-base_range, base_range):
             indel_table_copy = indel_table.copy()
             indel_table_copy["POS"] = indel_table["POS"] + i
             target_variants = df_subtract(
