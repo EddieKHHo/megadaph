@@ -89,15 +89,15 @@ def find_shared_allele_pos(per_sample_counts):
     per_sample_counts = [
         destrand_counts(counts) for counts in per_sample_counts
     ]
-    shared_alleles = DataFrame()
+    shared_alleles = DataFrame(columns=["CHROM", "POS", "REF", "ALT"])
     for nuc in ["A", "C", "G", "T"]:
         shared_base_pos = find_shared_base_pos(per_sample_counts, nuc)
         shared_alleles = shared_alleles.append(
             shared_base_pos, ignore_index=True, sort=False
         )
     shared_indel_pos = find_shared_indels(per_sample_counts)
-    shared_indel_pos["alt"] = "NA"
-    shared_indel_pos["ref"] = "NA"
+    shared_indel_pos["ref"] = "Any"
+    shared_indel_pos["alt"] = "Any"
     shared_alleles = shared_alleles.append(
         shared_indel_pos, ignore_index=True, sort=False
     )

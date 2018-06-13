@@ -49,11 +49,11 @@ def filter_variants(extreme_depth, shared_alleles, variants):
         chunksize=100000,
         dtype={"CHROM": str, "POS": float64, "REF": str, "ALT": str},
     ):
-        if "snps" in variants:
-            snps = shared_chunk[[shared_chunk["ALT"] != "NA"]]
+        if "snps" in variants.name:
+            snps = shared_chunk[shared_chunk["ALT"] != "Any"]
             filtered_variants = df_subtract(filtered_variants, snps)
-        else if "indels" in variants:
-            indels = shared_chunk[[shared_chunk["ALT"] == "NA"]]
+        elif "indels" in variants.name:
+            indels = shared_chunk[shared_chunk["ALT"] == "Any"]
             for i in range(-5, 5):
                 indels_copy = indels.copy()
                 indels_copy["POS"] = indels_copy["POS"] + i

@@ -203,7 +203,7 @@ rule all:
         'output/count_callable_loci/line_info.csv',
         expand('output/plot_variant_quality_metrics/{sample}.svg',
                sample=SAMPLE),
-        expand('output/allele_freq_filter/{sample}.{vartype}.big.tsv',
+        expand('output/noisy_alignment_filter/{sample}.{vartype}.big.tsv',
                 sample=SAMPLE, vartype=VARIANT_TYPES)
 
 
@@ -1133,7 +1133,6 @@ rule select_variants:
               '-o {output} ' +
               criteria)
 
-
 rule extract_variant_quality_metrics:
     input:
         unpack(match_final_assembly),
@@ -1211,6 +1210,84 @@ rule gatk_filter_variants:
               '--filterName {wildcards.vartype}_filter '
               '--filterExpression ' + filter_expression)
 
+rule allele_freq_filter:
+    input:
+        variants = 'output/gatk_filter_variants/{sample}.{vartype}.big.tsv'
+    output:
+        variants = 'output/allele_freq_filter/{sample}.{vartype}.big.tsv'
+    params:
+        min_af = 0.2,
+        min_depth = 15
+    run:
+        df = read_csv(input.variants, sep="\t")
+        AD_col = [col for col in df.columns if 'AD' in col][0]
+        allele_counts = df[AD_col].str.split(',', expand=True).fillna(0).astype(int)
+        allele_counts.values.sort()
+        mut_counts = allele_counts[allele_counts.columns[-2]]
+        wt_counts = allele_counts[allele_counts.columns[-1]]
+        depth = mut_counts + wt_counts
+        af = mut_counts / depth
+        filtered_df = df[(af >= 0.2) & (depth > 19)]
+        filtered_df.to_csv(output.variants, index=False, sep="\t")
+
+
+rule remove_flagged_variants:
+    input:
+        variants = (
+            'output/allele_freq_filter/{sample}.{vartype}.big.tsv'
+        ),
+        shared_alleles = lambda wildcards: (
+            'output/find_shared_alleles/' + get_genotype(wildcards) + '.tsv'
+        ),
+        extreme_depth = lambda wildcards: (
+            'output/find_extreme_depth_sites/' + get_genotype(wildcards) +
+            '.tsv'
+        )
+    output:
+        'output/remove_flagged_variants/{sample}.{vartype}.big.tsv'
+    shell:
+        'scripts/remove_flagged_variants.py '
+        '--extreme-depth {input.extreme_depth} '
+        '--shared-alleles {input.shared_alleles} '
+        '{input.variants} >{output}'
+
+rule remove_shared_homo_variants:
+    input:
+        filtered = expand(
+            'output/remove_flagged_variants/{sample}.{{vartype}}.big.tsv',
+            sample=SAMPLE),
+        unfiltered = expand(
+            'output/exclude_nonvariants/{sample}.{{vartype}}.big.tsv',
+            sample=SAMPLE)
+    output:
+        expand('output/remove_shared_homo_variants/{sample}.{{vartype}}.big.tsv',
+                sample=SAMPLE)
+    run:
+        # Remove all sites in each filtered sample which are also present in any
+        # unfiltered sample of the same genotype.
+        output_prefix = os.path.dirname(output[0]) + '/'
+        for genotype in GENOTYPE:
+            genotype_samples = GENOTYPE_TO_SAMPLE[genotype]
+            filtered_files = []
+            for f in input.filtered:
+                if any(substr in f for substr in genotype_samples):
+                    filtered_files.append(f)
+
+            for target in filtered_files:
+                comparisons = []
+                for f in input.unfiltered:
+                    if (any(substr in f for substr in genotype_samples) and
+                            local.path(target).name != local.path(f).name):
+                        comparisons.append(f)
+
+                shell('complement.py '
+                      '-o ' + output_prefix + ' '
+                      '--tab_separated '
+                      '-i 0,1,9 '
+                      '--target ' + target + ' ' +
+                      ' '.join([target] + comparisons))
+
+
 rule noisy_alignment_filter:
     input:
         initial = expand(
@@ -1218,7 +1295,7 @@ rule noisy_alignment_filter:
             sample=SAMPLE, vartype=VARIANT_TYPES
         ),
         filtered = expand(
-            "output/gatk_filter_variants/{sample}.{vartype}.big.tsv",
+            "output/remove_shared_homo_variants/{sample}.{vartype}.big.tsv",
             sample=SAMPLE, vartype=VARIANT_TYPES
         )
     output:
@@ -1229,7 +1306,7 @@ rule noisy_alignment_filter:
     params:
         base_range = 5
     run:
-        filtered_indir = "output/gatk_filter_variants"
+        filtered_indir = "output/remove_shared_homo_variants"
         unfiltered_indir = "output/exclude_nonvariants"
         outdir = "output/noisy_alignment_filter"
 
@@ -1267,84 +1344,6 @@ rule noisy_alignment_filter:
                     "%s >%s" %
                     (target_variants, ' '.join(other_indels), filtered_output)
                 )
-
-
-rule custom_filter_variants:
-    input:
-        variants = (
-            'output/noisy_alignment_filter/{sample}.{vartype}.big.tsv'
-        ),
-        shared_alleles = lambda wildcards: (
-            'output/find_shared_alleles/' + get_genotype(wildcards) + '.tsv'
-        ),
-        extreme_depth = lambda wildcards: (
-            'output/find_extreme_depth_sites/' + get_genotype(wildcards) +
-            '.tsv'
-        )
-    output:
-        'output/custom_filter_variants/{sample}.{vartype}.big.tsv'
-    shell:
-        'scripts/filter_variants.py '
-        '--extreme-depth {input.extreme_depth} '
-        '--shared-alleles {input.shared_alleles} '
-        '{input.variants} >{output}'
-
-rule remove_shared_homo_variants:
-    input:
-        filtered = expand(
-            'output/custom_filter_variants/{sample}.{{vartype}}.big.tsv',
-            sample=SAMPLE),
-        unfiltered = expand(
-            'output/exclude_nonvariants/{sample}.{{vartype}}.big.tsv',
-            sample=SAMPLE)
-    output:
-        expand('output/remove_shared_homo_variants/{sample}.{{vartype}}.big.tsv',
-                sample=SAMPLE)
-    run:
-        # Remove all sites in each filtered sample which are also present in any
-        # unfiltered sample of the same genotype.
-        output_prefix = os.path.dirname(output[0]) + '/'
-        for genotype in GENOTYPE:
-            genotype_samples = GENOTYPE_TO_SAMPLE[genotype]
-            filtered_files = []
-            for f in input.filtered:
-                if any(substr in f for substr in genotype_samples):
-                    filtered_files.append(f)
-
-            for target in filtered_files:
-                comparisons = []
-                for f in input.unfiltered:
-                    if (any(substr in f for substr in genotype_samples) and
-                            local.path(target).name != local.path(f).name):
-                        comparisons.append(f)
-
-                shell('complement.py '
-                      '-o ' + output_prefix + ' '
-                      '--tab_separated '
-                      '-i 0,1,9 '
-                      '--target ' + target + ' ' +
-                      ' '.join([target] + comparisons))
-
-
-rule allele_freq_filter:
-    input:
-        variants = 'output/remove_shared_homo_variants/{sample}.{vartype}.big.tsv'
-    output:
-        variants = 'output/allele_freq_filter/{sample}.{vartype}.big.tsv'
-    params:
-        min_af = 0.2,
-        min_depth = 15
-    run:
-        df = read_csv(input.variants, sep="\t")
-        AD_col = [col for col in df.columns if 'AD' in col][0]
-        allele_counts = df[AD_col].str.split(',', expand=True).fillna(0).astype(int)
-        allele_counts.values.sort()
-        mut_counts = allele_counts[allele_counts.columns[-2]]
-        wt_counts = allele_counts[allele_counts.columns[-1]]
-        depth = mut_counts + wt_counts
-        af = mut_counts / depth
-        filtered_df = df[(af >= 0.2) & (depth > 19)]
-        filtered_df.to_csv(output.variants, index=False, sep="\t")
 
 rule vcf_to_small_tsv:
     input:
