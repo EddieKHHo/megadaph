@@ -1341,6 +1341,22 @@ rule noisy_alignment_filter:
                     (target_variants, ' '.join(other_indels), filtered_output)
                 )
 
+
+rule filter_multiallelic_sites:
+    input:
+        variants = 'output/noisy_alignment_filter/{sample}.{vartype}.big.tsv'
+    output:
+        variants = 'output/filter_multiallelic_sites/{sample}.{vartype}.big.tsv'
+    run:
+        def is_multiallelic(alt_counts):
+            if len(alt_counts.split(",")) > 1:
+                return True
+            return False
+        df = read_csv(input.variants, sep="\t")
+        output_df = df[~df["ALT"].str.contains(",")]
+        output_df.to_csv(output.variants, index=False, sep="\t")
+
+
 rule vcf_to_small_tsv:
     input:
         unpack(match_final_assembly),
