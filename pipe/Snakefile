@@ -1400,63 +1400,6 @@ rule vcf_to_tsv:
 
 
 
-# ==============================================================================
-# Variant Validation
-# ==============================================================================
-
-rule realign_IAEC1:
-    input:
-        fwd_reads = 'output/filter_contamination_reduced/IAEC1.R1.fastq.gz',
-        rev_reads = 'output/filter_contamination_reduced/IAEC1.R2.fastq.gz',
-        unpaired_reads = (
-            'output/filter_contamination_reduced/IAEC1.unpaired.fastq.gz'),
-        assembly = 'output/filter_zero_coverage/{genotype}SC.fasta',
-        indices = ['output/filter_zero_coverage/{genotype}SC' + suffix
-                   for suffix in INDEX_SUFFIXES]
-    output:
-        'output/realign_IAEC1/IAEC1_to_{genotype}SC.bam'
-    threads: 12
-    resources:
-        mem_mb = 20000
-    params:
-        max_insert = 1000
-    run:
-        index_prefix = os.path.splitext(input.assembly)[0]
-        shell('bowtie2 -1 {input.fwd_reads} -2 {input.rev_reads} '
-              '-U {input.unpaired_reads} -X {params.max_insert} '
-              '-x ' + index_prefix + ' --rg-id=IAEC1 '
-              '--rg=LIB:IAEC1 --rg=PL:illumina '
-              '--rg=SM:IAEC1 -p {threads} | '
-              'samtools view -bh - | '
-              'samtools sort - > {output}')
-
-
-rule realign_IB2:
-    input:
-        fwd_reads = 'output/filter_contamination_reduced/IB2.R1.fastq.gz',
-        rev_reads = 'output/filter_contamination_reduced/IB2.R2.fastq.gz',
-        unpaired_reads = (
-            'output/filter_contamination_reduced/IAEC1.unpaired.fastq.gz'),
-        assembly = 'output/filter_zero_coverage/{genotype}SC.fasta',
-        indices = ['output/filter_zero_coverage/{genotype}SC' + suffix
-                   for suffix in INDEX_SUFFIXES]
-    output:
-        'output/realign_IB2/IB2_to_{genotype}SC.bam'
-    threads: 12
-    resources:
-        mem_mb = 20000
-    params:
-        max_insert = 1000
-    run:
-        index_prefix = os.path.splitext(input.assembly)[0]
-        shell('bowtie2 -1 {input.fwd_reads} -2 {input.rev_reads} '
-              '-U {input.unpaired_reads} -X {params.max_insert} '
-              '-x ' + index_prefix + ' --rg-id=IB2 '
-              '--rg=LIB:IB2 --rg=PL:illumina '
-              '--rg=SM:IB2 -p {threads} | '
-              'samtools view -bh - | '
-              'samtools sort - > {output}')
-
 #
 # ==============================================================================
 # Summarize Pipeline
