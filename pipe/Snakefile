@@ -1123,10 +1123,6 @@ rule select_variants:
             criteria = '--selectTypeToInclude SNP'
         elif wildcards.vartype == 'indels':
             criteria = '--selectTypeToInclude INDEL'
-        elif wildcards.vartype == 'other':
-            criteria = (
-                '--selectTypeToExclude SNP '
-                '--selectTypeToExclude INDEL')
         shell('java -jar {config[gatk3_jar]} -T SelectVariants '
               '-R {input.assembly} '
               '-V {input.vcf} '
@@ -1194,7 +1190,7 @@ rule gatk_filter_variants:
                 'MQRankSum': '< -12.5',
                 'ReadPosRankSum': ['< -10.0', '> 10.0']
             }
-        elif wildcards.vartype in ['indels', 'other']:
+        elif wildcards.vartype in ['indels']:
             filters = {
                 'QD': '< 5.0',
                 'FS': '> 200.0',
@@ -1283,7 +1279,7 @@ rule remove_shared_homo_variants:
                 shell('complement.py '
                       '-o ' + output_prefix + ' '
                       '--tab_separated '
-                      '-i 0,1,9 '
+                      '-i 0,1,3,4 '
                       '--target ' + target + ' ' +
                       ' '.join([target] + comparisons))
 
