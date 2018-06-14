@@ -1401,6 +1401,22 @@ rule vcf_to_tsv:
 
 
 #
+
+# ==============================================================================
+# Data Analysis
+# ==============================================================================
+rule extract_flanking_bases:
+    input:
+        unpack(match_final_assembly),
+        variants = 'output/noisy_alignment_filter/{sample}.{vartype}.big.tsv'
+    output:
+        'output/extract_flanking_bases/{sample}.fasta'
+    shell:
+        "extract_flanking_bases.py "
+        "-r {input.assembly} "
+        "-n 250 "
+        "{input.variants} >{output}"
+
 # ==============================================================================
 # Summarize Pipeline
 # ==============================================================================
