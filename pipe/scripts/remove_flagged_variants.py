@@ -19,6 +19,11 @@ from pandas import read_csv
 
 @click.command()
 @click.option(
+    "--indel-range",
+    type=int,
+    help="Number of bases surrounding indels to exclude",
+)
+@click.option(
     "--extreme-depth",
     type=click.File("r"),
     help="File containing list of sites with extreme read depth",
@@ -32,7 +37,7 @@ from pandas import read_csv
     ),
 )
 @click.argument("variants", nargs=1, type=click.File("r"))
-def filter_variants(extreme_depth, shared_alleles, variants):
+def filter_variants(indel_range, extreme_depth, shared_alleles, variants):
     filtered_variants = read_csv(variants, sep="\t")
 
     for depth_chunk in read_csv(
@@ -54,13 +59,12 @@ def filter_variants(extreme_depth, shared_alleles, variants):
             filtered_variants = df_subtract(filtered_variants, snps)
         elif "indels" in variants.name:
             indels = shared_chunk[shared_chunk["ALT"] == "Any"]
-            for i in range(-5, 5):
+            for i in range(-indel_range, indel_range):
                 indels_copy = indels.copy()
                 indels_copy["POS"] = indels_copy["POS"] + i
                 filtered_variants = df_subtract(
                     filtered_variants, indels_copy[["CHROM", "POS"]]
                 )
-
     filtered_variants = filtered_variants[filtered_variants["ALT"] != "*"]
     filtered_variants.to_csv(sys.stdout, sep="\t", index=False)
 
