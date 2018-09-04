@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from fmbiopy.iter import flatten
 import numpy as np
-from pandas import read_csv
+from pandas import concat, read_csv, Series
 from plumbum import (
     FG,
     local,
@@ -189,22 +189,58 @@ def count_lines(a_file):
     return int(wc("-l", a_file).rstrip().split()[0])
 
 
+def match_final_alignments(wildcards):
+    """Get the final full alignments and GATK local reassembly alignments."""
+    samples = GENOTYPE_TO_SAMPLE[wildcards.genotype]
+    if wildcards.step == "gatk":
+        bams = [
+            "output/call_variants/{}.bam".format(sample) for sample in samples
+        ]
+    else:
+        bams = [
+            "output/local_realignment/{}.bam".format(sample)
+            for sample in samples
+        ]
+    bais = [bam + ".bai" for bam in bams]
+    outdict = {
+        "bam": bams,
+        "bai": bais
+    }
+    return outdict
+
+
+def get_basegroup(f):
+    """Get part of file's basename before first period."""
+    basename = os.path.basename(f)
+    index_of_dot = basename.index(".")
+    return basename[:index_of_dot]
+
+
+def is_control(sample):
+    """Return True if sample is a control."""
+    return "SC" in sample or "EC" in sample
+
+
 # ==============================================================================
 # Pipeline Outputs
 # ==============================================================================
 rule all:
     input:
-        'output/multiqc/multiqc.html',
-        expand("output/produce_blobplots{iter}/{genotype}/family/{genotype}."
-               "bestsum.family.p20.span.100.blobplot.cov0.png",
-               genotype=GENOTYPE, iter=PLOT_ITER),
-        expand("output/produce_covplots{iter}/{sample}.covsum.png",
-               sample=SAMPLE, iter=PLOT_ITER),
-        'output/count_callable_loci/line_info.csv',
-        expand('output/plot_variant_quality_metrics/{sample}.svg',
-               sample=SAMPLE),
-        expand('output/noisy_alignment_filter/{sample}.{vartype}.big.tsv',
-                sample=SAMPLE, vartype=VARIANT_TYPES)
+        # 'output/multiqc/multiqc.html',
+        # expand("output/produce_blobplots{iter}/{genotype}/family/{genotype}."
+        #        "bestsum.family.p20.span.100.blobplot.cov0.png",
+        #        genotype=GENOTYPE, iter=PLOT_ITER),
+        # expand("output/produce_covplots{iter}/{sample}.covsum.png",
+        #        sample=SAMPLE, iter=PLOT_ITER),
+        # 'output/count_callable_loci/line_info.tsv',
+        # expand('output/plot_variant_quality_metrics/{sample}.svg',
+        #        sample=SAMPLE),
+        # expand('output/extract_flanking_bases/{sample}.{vartype}.fasta',
+        #         sample=SAMPLE, vartype=VARIANT_TYPES),
+        # expand('output/extract_random_subseqs/{sample}.{vartype}.fasta',
+        #         sample=SAMPLE, vartype=VARIANT_TYPES),
+        # 'output/merge_variants/variants.tsv'
+        expand("output/muver/{genotype}/sample_info.txt", genotype=GENOTYPE)
 
 
 # ==============================================================================
@@ -369,7 +405,6 @@ rule quality_trim:
 # ==============================================================================
 # Assembly-Decontamination Iteration
 # ==============================================================================
-
 rule assembly:
     input:
         unpack(match_reads)
@@ -827,6 +862,46 @@ rule local_realignment:
 # Variant Calling
 # ==============================================================================
 
+rule produce_muver_fastq_list:
+    input:
+        fwd_reads = lambda wildcards: (
+            "output/filter_contamination_reduced/{}.R1.fastq.gz".format(sample)
+            for sample in GENOTYPE_TO_SAMPLE[wildcards.genotype]
+        ),
+        rev_reads = lambda wildcards: (
+            "output/filter_contamination_reduced/{}.R2.fastq.gz".format(sample)
+            for sample in GENOTYPE_TO_SAMPLE[wildcards.genotype]
+        )
+    output:
+        fastq_list = "output/produce_muver_fastq_list/{genotype}.txt"
+    run:
+        with open(output.fastq_list, 'w') as f:
+            for fwd, rev in zip(input.fwd_reads, input.rev_reads):
+                sample_name = get_basegroup(fwd)
+                f.write("\t".join([sample_name, fwd, rev]) + "\n")
+
+
+rule run_muver:
+    input:
+        unpack(match_final_assembly),
+        fwd_reads = lambda wildcards: (
+            "output/filter_contamination_reduced/{}.R1.fastq.gz".format(sample)
+            for sample in GENOTYPE_TO_SAMPLE[wildcards.genotype]
+        ),
+        rev_reads = lambda wildcards: (
+            "output/filter_contamination_reduced/{}.R2.fastq.gz".format(sample)
+            for sample in GENOTYPE_TO_SAMPLE[wildcards.genotype]
+        ),
+        fastq_list = "output/produce_muver_fastq_list/{genotype}.txt"
+    output:
+        done = "output/muver/{genotype}/sample_info.txt"
+    shell:
+        "muver run_pipeline "
+        "{input.assembly} "
+        "{input.fastq_list} "
+        "{wildcards.genotype}SC "
+        "output/muver/{genotype}"
+
 rule call_variants:
     input:
         unpack(match_final_assembly),
@@ -928,36 +1003,27 @@ rule genotype_gvcfs:
 #         '--heterozygosity {params.snp_heterozygosity} '
 #         '--indel_heterozygosity {params.indel_heterozygosity}'
 
+
+
 rule produce_pileup:
     input:
         unpack(match_final_assembly),
-        bam = lambda wildcards: (
-            expand(
-                'output/local_realignment/{sample}.bam',
-                sample=GENOTYPE_TO_SAMPLE[wildcards.genotype]
-            )
-        ),
-        bai = lambda wildcards: (
-            expand(
-                'output/local_realignment/{sample}.bam.bai',
-                sample=GENOTYPE_TO_SAMPLE[wildcards.genotype]
-            )
-        ),
+        unpack(match_final_alignments),
         intervals = 'output/repeatmasker/{genotype}SC.inverted.bed'
-
     output:
-        'output/produce_pileup/{genotype}.done.txt'
+        'output/produce_pileup/{genotype}.{step}.done.txt'
     resources:
         mem_mb = 20000
     run:
         actual_outputs = [
-            "output/produce_pileup/" +
-            os.path.splitext(os.path.basename(f))[0] + ".tmp.pileup"
-            for f in input.bam
+            "output/produce_pileup/{}.{}.tmp.pileup".format(
+                get_basegroup(f),
+                wildcards.step,
+            ) for f in input.bam
         ]
-
-        tmp_output = ''.join(
-            ['output/produce_pileup/', wildcards.genotype, '.pileup']
+        tmp_output = "output/produce_pileup/{}.{}.pileup".format(
+            wildcards.genotype,
+            wildcards.step
         )
         shell(
             'samtools mpileup -aa -B -d 1000 -Q 0 -l {input.intervals} '
@@ -965,7 +1031,6 @@ rule produce_pileup:
             'sed \'s/          /       *       */g\' | '
             '{config[mpileup2readcounts]} 0 -5 false 0 0 >%s' % tmp_output
         )
-
         # Split the merged output table into per sample tables.
         col_range = (4, 14)
         for i in range(len(input.bam)):
@@ -980,15 +1045,27 @@ rule produce_pileup:
 
 rule gather_pileups:
     input:
-        expand('output/produce_pileup/{genotype}.done.txt', genotype=GENOTYPE)
+        pileups = expand(
+            'output/produce_pileup/{genotype}.{{step}}.done.txt',
+            genotype=GENOTYPE
+        )
     output:
-        pileups = expand('output/produce_pileup/{sample}.pileup', sample=SAMPLE)
+        pileups = expand(
+            'output/produce_pileup/{sample}.{{step}}.pileup',
+            sample=SAMPLE
+        )
     run:
         tmp_outputs = [
-            "output/produce_pileup/" + sample + ".tmp.pileup"
-            for sample in SAMPLE
+            "output/produce_pileup/{}.{}.tmp.pileup".format(
+                sample,
+                wildcards.step
+            ) for sample in SAMPLE
         ]
-        for src, dest in zip(tmp_outputs, output.pileups):
+        print(get_basegroup(sorted(tmp_outputs)[0]))
+        print(get_basegroup(sorted(output.pileups)[0]))
+
+        for src, dest in zip(sorted(tmp_outputs), sorted(output.pileups)):
+            assert get_basegroup(src) == get_basegroup(dest)
             move(src, dest)
 
 
@@ -999,7 +1076,7 @@ rule find_extreme_depth_sites:
     input:
         lambda wildcards: (
             [
-                'output/produce_pileup/' + sample + '.pileup'
+                'output/produce_pileup/{}.main.pileup'.format(sample)
                 for sample in GENOTYPE_TO_SAMPLE[wildcards.genotype]
             ]
         )
@@ -1007,26 +1084,33 @@ rule find_extreme_depth_sites:
         'output/find_extreme_depth_sites/{genotype}.tsv'
     params:
         min_depth = 20,
-        max_depth = 150
+        max_depth = 100
     shell:
         'scripts/find_extreme_depth_sites.py '
         '--min-depth {params.min_depth} '
         '--max-depth {params.max_depth} '
         '{input} >{output}'
 
-
 rule find_shared_alleles:
     input:
-        lambda wildcards: (
+        main = lambda wildcards: (
             [
-                'output/produce_pileup/' + sample + '.pileup'
+                'output/produce_pileup/{}.main.pileup'.format(sample)
+                for sample in GENOTYPE_TO_SAMPLE[wildcards.genotype]
+            ]
+        ),
+        gatk = lambda wildcards: (
+            [
+                'output/produce_pileup/{}.gatk.pileup'.format(sample)
                 for sample in GENOTYPE_TO_SAMPLE[wildcards.genotype]
             ]
         )
     output:
         'output/find_shared_alleles/{genotype}.tsv'
     shell:
-        'scripts/find_shared_alleles.py {input} >{output}'
+        'scripts/find_shared_alleles.py {input.main} >{output}; '
+        'scripts/find_shared_alleles.py {input.gatk} | '
+        'tail -n +2 >>{output}'
 
 
 
@@ -1035,80 +1119,27 @@ rule find_shared_alleles:
 rule count_callable_loci:
     input:
         pileup = expand(
-            "output/produce_pileup/{sample}.pileup", sample=SAMPLE
+            "output/produce_pileup/{sample}.main.pileup", sample=SAMPLE
         ),
         extreme_depth = expand(
             "output/find_extreme_depth_sites/{genotype}.tsv", genotype=GENOTYPE
         )
     output:
-        line_info = 'output/count_callable_loci/line_info.csv'
+        line_info = 'output/count_callable_loci/line_info.tsv'
     run:
         line_info = read_csv(config['line_info'])
         line_info['bases_surveyed'] = np.nan
 
         for sample in SAMPLE:
-            pileup = "output/produce_pileup/%s.pileup" % sample
+            pileup = "output/produce_pileup/%s.main.pileup" % sample
             extreme_depth = "output/find_extreme_depth_sites/%s.tsv" % sample[0:2]
             num_callable_loci = count_lines(pileup) - count_lines(extreme_depth)
+            genotype = sample[0:2]
             genotype_idx = [x.startswith(genotype) for x in line_info['sample']]
             line_info.loc[genotype_idx, 'bases_surveyed'] = num_callable_loci
-        line_info.to_csv(output.line_info, index=False)
+        line_info.to_csv(output.line_info, sep="\t", index=False)
 
 
-# Filter out variants which are present in multiple samples
-# rule filter_shared_variants:
-#     input:
-#         expand('output/depth_filter_variants/{genotype}.tsv',
-#                 genotype=GENOTYPE)
-#     output:
-#         expand('output/filter_shared_variants/{sample}.tsv',
-#                 sample=SAMPLE)
-#     params:
-#         cutoff = 0.2
-#     threads: 9
-#     run:
-#         outdir = os.path.dirname(output[0])
-#         shell('parallel -j {threads} '
-#               '"scripts/filter_shared_alleles_gatk.py '
-#               '--het-cutoff {params.cutoff} '
-#               '--outdir ' + outdir + '" ' +
-#               '::: {input}')
-#
-# Filter variants in the per-sample .vcf files using the the merged, filtered
-# variant tables.
-# rule filter_per_sample_variants:
-#     input:
-#         unpack(match_final_assembly),
-#         tsv = 'output/filter_shared_variants/{sample}.tsv',
-#         vcf = 'output/genotype_gvcfs/{sample}.vcf'
-#     output:
-#         'output/filter_per_sample_variants/{sample}.vcf'
-#     resources:
-#         mem_mb = 20000
-#     shell:
-#         # Extract the vcf header
-#         "grep '^#' {input.vcf} > {output};"
-#
-#         # Filter out all variant positions in input.vcf which are not in
-#         # input.tsv
-#         "cat {input.tsv} | "
-#         "awk '{{printf \"%s\\t%s\\t\\n\", $1, $2}}' | "
-#         "grep -f /dev/stdin {input.vcf} >> {output};"
-#
-#         # This is done so that gatk creates a vcf index file
-#         "java -jar {config[gatk3_jar]} -T ValidateVariants "
-#         "-R {input.assembly} "
-#         "-V {output} "
-
-
-# rule extract_variant_coverage:
-#     input:
-#         'output/filter_per_sample_variants/{sample}.vcf'
-#     output:
-#         'output/extract_variant_coverage{iter}/{sample}.txt',
-#     shell:
-#         'extract_variant_coverage.py -o {output} {input}'
-#
 rule select_variants:
     input:
         unpack(match_final_assembly),
@@ -1212,8 +1243,7 @@ rule allele_freq_filter:
     output:
         variants = 'output/allele_freq_filter/{sample}.{vartype}.big.tsv'
     params:
-        min_af = 0.2,
-        min_depth = 15
+        min_af = 0.2
     run:
         df = read_csv(input.variants, sep="\t")
         AD_col = [col for col in df.columns if 'AD' in col][0]
@@ -1223,7 +1253,7 @@ rule allele_freq_filter:
         wt_counts = allele_counts[allele_counts.columns[-1]]
         depth = mut_counts + wt_counts
         af = mut_counts / depth
-        filtered_df = df[(af >= 0.2) & (depth > 19)]
+        filtered_df = df[(af >= params.min_af) & (depth > 19)]
         filtered_df.to_csv(output.variants, index=False, sep="\t")
 
 
@@ -1241,8 +1271,11 @@ rule remove_flagged_variants:
         )
     output:
         'output/remove_flagged_variants/{sample}.{vartype}.big.tsv'
+    params:
+        indel_exclude_range = "10"
     shell:
         'scripts/remove_flagged_variants.py '
+        '--indel-range {params.indel_exclude_range} '
         '--extreme-depth {input.extreme_depth} '
         '--shared-alleles {input.shared_alleles} '
         '{input.variants} >{output}'
@@ -1300,7 +1333,7 @@ rule noisy_alignment_filter:
             sample=SAMPLE, vartype=VARIANT_TYPES
         )
     params:
-        base_range = 5
+        base_range = 5,
     run:
         filtered_indir = "output/remove_shared_homo_variants"
         unfiltered_indir = "output/exclude_nonvariants"
@@ -1357,6 +1390,30 @@ rule filter_multiallelic_sites:
         output_df.to_csv(output.variants, index=False, sep="\t")
 
 
+rule filter_misaligned_indels:
+    input:
+        pileups = lambda wildcards: (
+            [
+                "output/produce_pileup/{}.gatk.pileup".format(sample)
+                for sample in GENOTYPE_TO_SAMPLE[wildcards.sample[0:2]]
+            ]
+        ),
+        variants = 'output/filter_multiallelic_sites/{sample}.{vartype}.big.tsv'
+    output:
+        variants = "output/filter_misaligned_indels/{sample}.{vartype}.big.tsv"
+    run:
+        if wildcards.vartype == "snps":
+            copy(input.variants, output.variants)
+        else:
+            pileups = [x for x in input.pileups if wildcards.sample not in x]
+            shell(
+                "scripts/filter_misaligned_shared_indels.py "
+                "--indels {input.variants} " +
+                " ".join(pileups) +
+                " >{output.variants}"
+            )
+
+
 rule vcf_to_small_tsv:
     input:
         unpack(match_final_assembly),
@@ -1386,7 +1443,7 @@ rule vcf_to_tsv:
         '-V {input.vcf} '
         '-o {output} '
         '-F CHROM -F POS -F REF -F ALT -GF GT -F QUAL -F MQ -F DP '
-        '-F TRANSITION -GF AD -GF DP -F TYPE'
+        '-F TRANSITION -GF AD -F TYPE'
 
 
 # rule calc_mutation_rate:
@@ -1403,19 +1460,83 @@ rule vcf_to_tsv:
 #
 
 # ==============================================================================
+# Variant Annotation
+# ==============================================================================
+rule annotate_variant_context:
+    input:
+        unpack(match_final_assembly),
+        variants = 'output/filter_misaligned_indels/{sample}.{vartype}.big.tsv'
+    output:
+        variants = 'output/annotate_variant_context/{sample}.{vartype}.big.tsv'
+    params:
+        nbases = "3"
+    run:
+        extract_flanking_bases = local["extract_flanking_bases.py"]
+        variant_table = read_csv(input.variants, sep="\t")
+        pre_context = extract_flanking_bases(
+            "-r", input.assembly, "--pre", params.nbases, input.variants
+        ).split("\n")[1::2]
+        post_context = extract_flanking_bases(
+            "-r", input.assembly, "--post", params.nbases, input.variants
+        ).split("\n")[1::2]
+        variant_table["pre_context"] = pre_context
+        variant_table["post_context"] = post_context
+        variant_table.to_csv(output.variants, sep="\t", index=False)
+
+rule merge_variants:
+    input:
+        variants = expand(
+            'output/annotate_variant_context/{sample}.{vartype}.big.tsv',
+            sample=SAMPLE,
+            vartype=VARIANT_TYPES
+        )
+    output:
+        variants = 'output/merge_variants/variants.tsv'
+    run:
+        all_variant_tables = [read_csv(x, sep="\t") for x in input.variants]
+        all_sample_names = [get_basegroup(x) for x in input.variants]
+        variant_tables = []
+        sample_names = []
+        for table, sample in zip(all_variant_tables, all_sample_names):
+            if len(table) > 0 and not is_control(sample):
+                table["sample"] = sample
+                table = table.drop(sample + ".DP", axis=1)
+                table.columns = table.columns.str.replace(sample + ".", "")
+                variant_tables.append(table)
+                sample_names.append(sample)
+        merged_table = concat(variant_tables, sort=True)
+        merged_table.to_csv(output.variants, index=False, sep="\t")
+
+
+# ==============================================================================
 # Data Analysis
 # ==============================================================================
 rule extract_flanking_bases:
     input:
         unpack(match_final_assembly),
-        variants = 'output/noisy_alignment_filter/{sample}.{vartype}.big.tsv'
+        variants = 'output/filter_misaligned_indels/{sample}.{vartype}.big.tsv'
     output:
-        'output/extract_flanking_bases/{sample}.fasta'
+        'output/extract_flanking_bases/{sample}.{vartype}.fasta'
     shell:
         "extract_flanking_bases.py "
         "-r {input.assembly} "
         "-n 250 "
         "{input.variants} >{output}"
+
+
+
+rule extract_random_subseqs:
+    input:
+        unpack(match_final_assembly),
+        variants = 'output/filter_misaligned_indels/{sample}.{vartype}.big.tsv'
+    output:
+        'output/extract_random_subseqs/{sample}.{vartype}.fasta'
+    shell:
+        'extract_random_subseqs.py '
+        '-n "$(tail -n+2 {input.variants} | wc -l)" '
+        '-b 501 '
+        '{input.assembly} >{output}'
+
 
 # ==============================================================================
 # Summarize Pipeline
